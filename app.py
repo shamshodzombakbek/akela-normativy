@@ -12,6 +12,7 @@ from utils import (
     load_staffing,
     build_roster_attendance,
     build_filled_staffing_with_reports,
+    kpi_category,
 )
 
 ROOT = Path(__file__).resolve().parent
@@ -519,21 +520,52 @@ if not filled_staff.empty or not vacancies.empty or not roster.empty:
     st.divider()
 
 # =========================
-# Metrics (по загруженным Excel)
+# Metrics + charts (Excel или «все не сдали»)
 # =========================
+from utils import kpi_category as _kpi_cat
+
+has_uploads = not (df is None or df.empty or "KPI" not in getattr(df, "columns", []))
+
+# Для диаграмм: если загрузок нет — весь штат (уникальные) как «не сдал»
+if has_uploads:
+    chart_df = df.copy()
+    if "Категория" not in chart_df.columns:
+        chart_df["Категория"] = chart_df["KPI"].map(
+            lambda x: kpi_category(float(x) if x is not None else None)
+        )
+else:
+    # сплошной чёрный «не сдал» по уникальным сотрудникам штата
+    people_n = int(
+        filled_staff.attrs.get("people_total")
+        or (filled_staff["ФИО"].nunique() if not filled_staff.empty else 0)
+        or 1
+    )
+    chart_df = pd.DataFrame(
+        {
+            "Сотрудник": [f"Сотрудник {i+1}" for i in range(people_n)],
+            "KPI": [0.0] * people_n,
+            "Категория": ["⚫ 0 / не сдал"] * people_n,
+        }
+    )
+
 st.markdown('<p class="akela-section-label">Сводка по загруженным %</p>', unsafe_allow_html=True)
 
-if df.empty or "KPI" not in getattr(df, "columns", []):
-    st.info("Пока нет загруженных Excel за этот день — в таблице выше все со статусом «Не сдал».")
-    st.stop()
+if not has_uploads:
+    st.caption("Пока нет загруженных Excel — статистика: 100% не сдали.")
 
-with_kpi = df[df["KPI"] > 0] if "KPI" in df.columns else df
+with_kpi = chart_df[chart_df["KPI"] > 0] if "KPI" in chart_df.columns else chart_df
 
 c1, c2, c3, c4 = st.columns(4)
-c1.metric("Записей Excel", len(df))
-c2.metric("Средний %", f"{df['KPI'].mean():.1f}%")
-c3.metric("Максимум", f"{df['KPI'].max():.1f}%")
-c4.metric("Минимум", f"{df['KPI'].min():.1f}%")
+if has_uploads:
+    c1.metric("Записей Excel", len(df))
+    c2.metric("Средний %", f"{df['KPI'].mean():.1f}%")
+    c3.metric("Максимум", f"{df['KPI'].max():.1f}%")
+    c4.metric("Минимум", f"{df['KPI'].min():.1f}%")
+else:
+    c1.metric("Записей Excel", 0)
+    c2.metric("Средний %", "0%")
+    c3.metric("Сдали", "0%")
+    c4.metric("Не сдали", "100%")
 
 st.divider()
 
@@ -553,43 +585,64 @@ cat_colors = {
     "⚫ 0 / не сдал": "#1A1A1A",
 }
 
+# Отдельная круговая: сдали / не сдали (когда нет загрузок — сплошной чёрный 100%)
+submit_label = "❌ Не сдали"
+ok_label = "✅ Сдали"
+if has_uploads and not filled_staff.empty:
+    sub_n_chart = int(filled_staff.attrs.get("submitted") or 0)
+    miss_n_chart = int(filled_staff.attrs.get("missing") or 0)
+elif has_uploads:
+    sub_n_chart = int((chart_df["KPI"] > 0).sum())
+    miss_n_chart = int((chart_df["KPI"] <= 0).sum())
+else:
+    sub_n_chart = 0
+    miss_n_chart = int(len(chart_df))
+
+submit_stats = pd.DataFrame(
+    {
+        "Статус": [ok_label, submit_label],
+        "Количество": [sub_n_chart, miss_n_chart],
+    }
+)
+submit_stats = submit_stats[submit_stats["Количество"] > 0]
+submit_colors = {ok_label: "#22A06B", submit_label: "#1A1A1A"}
+
 with col1:
-    stats = df["Категория"].value_counts().reindex(cat_order).dropna().reset_index()
-    stats.columns = ["Категория", "Количество"]
     pie = px.pie(
-        stats,
-        names="Категория",
+        submit_stats,
+        names="Статус",
         values="Количество",
         hole=0.58,
-        title="По категориям",
-        color="Категория",
-        color_discrete_map=cat_colors,
+        title="Сдали / не сдали",
+        color="Статус",
+        color_discrete_map=submit_colors,
     )
     pie.update_traces(textposition="inside", textinfo="percent+label", textfont_size=12)
     pie.update_layout(**PLOTLY_LAYOUT, showlegend=False)
     st.plotly_chart(pie, use_container_width=True)
 
 with col2:
-    stats = (
-        with_kpi["Категория"].value_counts().reindex(cat_order).dropna().reset_index()
-        if not with_kpi.empty
-        else df["Категория"].value_counts().reindex(cat_order).dropna().reset_index()
-    )
+    stats = chart_df["Категория"].value_counts().reindex(cat_order).dropna().reset_index()
     stats.columns = ["Категория", "Количество"]
-    bar = px.bar(
+    # если пусто — один чёрный сегмент
+    if stats.empty:
+        stats = pd.DataFrame({"Категория": ["⚫ 0 / не сдал"], "Количество": [len(chart_df) or 1]})
+    pie2 = px.pie(
         stats,
-        x="Категория",
-        y="Количество",
-        text_auto=True,
-        title="Распределение",
+        names="Категория",
+        values="Количество",
+        hole=0.58,
+        title="По категориям KPI",
         color="Категория",
         color_discrete_map=cat_colors,
-        category_orders={"Категория": cat_order},
     )
-    bar.update_layout(**PLOTLY_LAYOUT, showlegend=False)
-    bar.update_xaxes(showgrid=False, title="")
-    bar.update_yaxes(showgrid=True, gridcolor="rgba(26,35,50,0.08)", title="")
-    st.plotly_chart(bar, use_container_width=True)
+    pie2.update_traces(textposition="inside", textinfo="percent+label", textfont_size=12)
+    pie2.update_layout(**PLOTLY_LAYOUT, showlegend=False)
+    st.plotly_chart(pie2, use_container_width=True)
+
+if not has_uploads:
+    st.caption("Диаграммы: 100% «не сдал» — пока никто не загрузил Excel за этот день.")
+    st.stop()
 
 sort_cols = st.columns([2.2, 1.2])
 with sort_cols[0]:
