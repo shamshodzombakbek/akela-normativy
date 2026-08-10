@@ -224,11 +224,11 @@ def _token_variants(value: str | None) -> set[str]:
 
 
 def load_staffing(path: str | Path | None = None) -> pd.DataFrame:
-    """Штатная расстановка: места (занято / вакансия)."""
+    """Штатная расстановка: места (занято / вакансия). «юклатилган» = занято."""
     source = Path(path) if path else STAFFING_PATH
     if not source.is_file():
         return pd.DataFrame(
-            columns=["№", "Код", "Должность", "Штатных_единиц", "ФИО", "Статус_места"]
+            columns=["№", "Код", "Должность", "Штатных_единиц", "ФИО", "Статус_места", "Пометка"]
         )
     raw = pd.read_csv(source) if source.suffix.lower() == ".csv" else pd.read_excel(source)
     if raw.empty:
@@ -243,31 +243,53 @@ def load_staffing(path: str | Path | None = None) -> pd.DataFrame:
         "Штатных_единиц": ("штатных_единиц", "units", "кол-во"),
         "ФИО": ("фио", "сотрудник", "name"),
         "Статус_места": ("статус_места", "status", "seat_status"),
+        "Пометка": ("пометка", "note", "tag"),
     }.items():
         for a in aliases:
             if a in cols:
                 rename[cols[a]] = want
                 break
     out = raw.rename(columns=rename)
-    for col in ["№", "Код", "Должность", "Штатных_единиц", "ФИО", "Статус_места"]:
+    for col in ["№", "Код", "Должность", "Штатных_единиц", "ФИО", "Статус_места", "Пометка"]:
         if col not in out.columns:
             out[col] = "" if col != "Штатных_единиц" else 1
     out["ФИО"] = out["ФИО"].fillna("").astype(str).str.strip()
     out["Должность"] = out["Должность"].fillna("").astype(str).str.strip()
-    status = out["Статус_места"].fillna("").astype(str)
-    vacant_mask = status.str.contains("вакан", case=False, na=False) | (
-        out["ФИО"].eq("") | out["ФИО"].str.casefold().isin({"nan", "none", "вакант"})
+    out["Пометка"] = out["Пометка"].fillna("").astype(str).str.strip()
+
+    # юклатилган в ФИО или пометке — это сотрудник, не вакансия
+    yuk_mask = (
+        out["Пометка"].str.contains("юклатилган", case=False, na=False)
+        | out["ФИО"].str.contains("юклатилган", case=False, na=False)
+        | out["Пометка"].str.contains("yuklatilgan", case=False, na=False)
     )
+    out.loc[yuk_mask, "Пометка"] = "юклатилган"
+    # убрать хвост из ФИО, если вдруг остался
+    out["ФИО"] = out["ФИО"].str.replace(
+        r"\(?\s*юклатилган\s*\)?", "", regex=True, case=False
+    )
+    out["ФИО"] = out["ФИО"].str.replace(r"\s+", " ", regex=True).str.strip(" -()")
+
+    status = out["Статус_места"].fillna("").astype(str)
+    vacant_mask = (
+        status.str.contains("вакан", case=False, na=False)
+        | out["ФИО"].eq("")
+        | out["ФИО"].str.casefold().isin({"nan", "none", "вакант"})
+    ) & ~yuk_mask
+    # если есть ФИО или юклатилган — место занято
     out.loc[vacant_mask, "Статус_места"] = "Вакансия"
     out.loc[~vacant_mask, "Статус_места"] = "Занято"
+    out.loc[out["Статус_места"] == "Вакансия", "Пометка"] = ""
+
     out.attrs["seats_total"] = int(len(out))
     out.attrs["seats_filled"] = int((out["Статус_места"] == "Занято").sum())
     out.attrs["seats_vacant"] = int((out["Статус_места"] == "Вакансия").sum())
+    out.attrs["seats_yuklatilgan"] = int((out["Пометка"] == "юклатилган").sum())
     return out
 
 
 def load_employees_roster(path: str | Path | None = None) -> pd.DataFrame:
-    """Уникальные сотрудники (занятые места): ФИО + Должность."""
+    """Уникальные сотрудники (занятые места), включая «юклатилган»."""
     source = Path(path) if path else ROSTER_PATH
     if source.is_file():
         if source.suffix.lower() in {".xlsx", ".xls"}:
@@ -283,23 +305,34 @@ def load_employees_roster(path: str | Path | None = None) -> pd.DataFrame:
             or cols.get("lavozim")
             or (list(raw.columns)[1] if len(raw.columns) > 1 else None)
         )
+        note_col = cols.get("пометка") or cols.get("note") or cols.get("tag")
 
         rows = []
         for _, row in raw.iterrows():
             fio = str(row.get(fio_col) or "").strip()
+            # юклатилган в ячейке ФИО — тоже сотрудник
+            note = ""
+            if re.search(r"юклатилган|yuklatilgan", fio, flags=re.I):
+                note = "юклатилган"
+                fio = re.sub(r"\(?\s*юклатилган\s*\)?", "", fio, flags=re.I)
+                fio = re.sub(r"\s+", " ", fio).strip(" -()")
+            if note_col is not None:
+                n2 = str(row.get(note_col) or "").strip()
+                if re.search(r"юклатилган|yuklatilgan", n2, flags=re.I):
+                    note = "юклатилган"
             if not fio or fio.casefold() in {"фио", "nan", "none", "вакант"}:
                 continue
             role = str(row.get(role_col) or "").strip() if role_col is not None else ""
             if role.casefold() in {"должность", "nan", "none"}:
                 role = ""
-            rows.append({"ФИО": fio, "Должность": role})
+            rows.append({"ФИО": fio, "Должность": role, "Пометка": note})
         if rows:
             return pd.DataFrame(rows)
 
     # fallback: уникальные ФИО из staffing.csv
     staff = load_staffing()
     if staff.empty:
-        return pd.DataFrame(columns=["ФИО", "Должность"])
+        return pd.DataFrame(columns=["ФИО", "Должность", "Пометка"])
     filled = staff[staff["Статус_места"] == "Занято"].copy()
     rows = []
     seen: set[str] = set()
@@ -309,7 +342,13 @@ def load_employees_roster(path: str | Path | None = None) -> pd.DataFrame:
         if not fio or key in seen:
             continue
         seen.add(key)
-        rows.append({"ФИО": fio, "Должность": str(row.get("Должность") or "").strip()})
+        rows.append(
+            {
+                "ФИО": fio,
+                "Должность": str(row.get("Должность") or "").strip(),
+                "Пометка": str(row.get("Пометка") or "").strip(),
+            }
+        )
     return pd.DataFrame(rows)
 
 
@@ -372,10 +411,22 @@ def build_roster_attendance(
     """
     if roster is None or roster.empty:
         return pd.DataFrame(
-            columns=["ФИО", "Должность", "Статус", "KPI", "Категория", "Файл", "Сотрудник_в_отчёте"]
+            columns=[
+                "ФИО",
+                "Должность",
+                "Пометка",
+                "Статус",
+                "KPI",
+                "Категория",
+                "Файл",
+                "Сотрудник_в_отчёте",
+            ]
         )
 
     base = roster.copy().reset_index(drop=True)
+    if "Пометка" not in base.columns:
+        base["Пометка"] = ""
+    base["Пометка"] = base["Пометка"].fillna("").astype(str)
     base["Статус"] = "❌ Не сдал"
     base["KPI"] = 0.0
     base["Категория"] = kpi_category(None)
@@ -388,6 +439,7 @@ def build_roster_attendance(
         out.attrs["total"] = len(out)
         out.attrs["submitted"] = 0
         out.attrs["missing"] = len(out)
+        out.attrs["yuklatilgan"] = int((out["Пометка"] == "юклатилган").sum())
         out.attrs["unmatched_uploads"] = []
         return out
 
@@ -434,5 +486,6 @@ def build_roster_attendance(
     out.attrs["total"] = len(out)
     out.attrs["submitted"] = submitted_n
     out.attrs["missing"] = len(out) - submitted_n
+    out.attrs["yuklatilgan"] = int((out["Пометка"] == "юклатилган").sum())
     out.attrs["unmatched_uploads"] = unmatched
     return out

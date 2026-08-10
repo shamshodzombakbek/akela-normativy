@@ -405,6 +405,7 @@ if not staffing.empty or not roster.empty:
     seats_total = int(staffing.attrs.get("seats_total") or len(staffing) or 0)
     seats_filled = int(staffing.attrs.get("seats_filled") or 0)
     seats_vacant = int(staffing.attrs.get("seats_vacant") or 0)
+    seats_yuk = int(staffing.attrs.get("seats_yuklatilgan") or 0)
     people_n = int(attendance.attrs.get("total") or len(attendance) or 0)
     sub_n = int(attendance.attrs.get("submitted") or 0)
     miss_n = int(attendance.attrs.get("missing") or 0)
@@ -417,6 +418,8 @@ if not staffing.empty or not roster.empty:
     s2.metric("Занято", seats_filled if seats_total else people_n)
     s3.metric("Вакансии", seats_vacant if seats_total else "—")
     s4.metric("Заполненность", f"{fill_rate:.0f}%" if seats_total else "—")
+    if seats_yuk:
+        st.caption(f"В занятых местах учтены пометки «юклатилган»: {seats_yuk}")
 
     st.markdown('<p class="akela-section-label">Сдача нормативов</p>', unsafe_allow_html=True)
     r1, r2, r3, r4 = st.columns(4)
@@ -457,7 +460,7 @@ if not staffing.empty or not roster.empty:
             ]
         show_staff = [
             c
-            for c in ["№", "Код", "Должность", "ФИО", "Статус_места"]
+            for c in ["№", "Код", "Должность", "ФИО", "Статус_места", "Пометка"]
             if c in staff_view.columns
         ]
         st.dataframe(staff_view[show_staff], use_container_width=True, hide_index=True)
@@ -475,7 +478,7 @@ if not staffing.empty or not roster.empty:
             ]
         show_cols = [
             c
-            for c in ["ФИО", "Должность", "Статус", "KPI", "Категория", "Файл"]
+            for c in ["ФИО", "Должность", "Пометка", "Статус", "KPI", "Категория", "Файл"]
             if c in roster_view.columns
         ]
         st.dataframe(roster_view[show_cols], use_container_width=True, hide_index=True)
