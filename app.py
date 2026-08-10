@@ -441,20 +441,21 @@ if not filled_staff.empty or not vacancies.empty or not roster.empty:
     st.markdown('<p class="akela-section-label">Штат</p>', unsafe_allow_html=True)
     s1, s2, s3, s4 = st.columns(4)
     s1.metric("Рабочих мест", seats_total or "—")
-    s2.metric("Должностей (сдать отчёт)", seats_filled)
+    s2.metric("Должностей (сдать отчёт)", seats_filled if False else int(filled_staff.attrs.get("total") or seats_filled))
     s3.metric("Сдали отчёт", sub_n)
     s4.metric("Не сдали", miss_n)
     denom = int(filled_staff.attrs.get("people_total") or seats_filled or 0)
+    exempt_n = int(filled_staff.attrs.get("exempt") or 0)
     st.caption(
-        f"Сдали {people_rate:.0f}% от занятых должностей"
+        f"Сдали {people_rate:.0f}% от должностей, которые обязаны сдавать"
         + (f" ({denom})" if denom else "")
+        + (f" · директора вне графика: {exempt_n}" if exempt_n else "")
         + (f" · вакансий отдельно: {seats_vacant}" if seats_vacant else "")
-        + (f" · юклатилган учтены: {seats_yuk}" if seats_yuk else "")
     )
 
     status_filter = st.radio(
         "Фильтр штата",
-        ["Все занятые", "✅ Сдали", "❌ Не сдали"],
+        ["Все занятые", "✅ Сдали", "❌ Не сдали", "➖ Не обязаны"],
         horizontal=True,
         label_visibility="collapsed",
     )
@@ -467,8 +468,11 @@ if not filled_staff.empty or not vacancies.empty or not roster.empty:
     staff_view = filled_staff.copy()
     if status_filter == "✅ Сдали":
         staff_view = staff_view[staff_view["Статус"] != "❌ Не сдал"]
+        staff_view = staff_view[staff_view["Статус"] != "➖ Не обязан"]
     elif status_filter == "❌ Не сдали":
         staff_view = staff_view[staff_view["Статус"] == "❌ Не сдал"]
+    elif status_filter == "➖ Не обязаны":
+        staff_view = staff_view[staff_view["Статус"] == "➖ Не обязан"]
     if search_staff:
         q = search_staff.strip()
         staff_view = staff_view[
@@ -534,15 +538,19 @@ if has_uploads:
             lambda x: kpi_category(float(x) if x is not None else None)
         )
 else:
-    # сплошной чёрный «не сдал» по занятым должностям штата
+    # сплошной чёрный «не сдал» только по обязанным должностям (без директоров)
     if not filled_staff.empty:
+        required = filled_staff[filled_staff["Статус"] != "➖ Не обязан"]
         labels = [
             f"{str(r.get('Должность') or '').strip()} · {str(r.get('ФИО') or '').strip()}".strip(" ·")
-            for _, r in filled_staff.iterrows()
+            for _, r in required.iterrows()
         ]
     else:
         labels = ["Должность 1"]
-    seats_n = len(labels)
+    seats_n = len(labels) or 1
+    if not labels:
+        labels = ["Должность 1"]
+        seats_n = 1
     chart_df = pd.DataFrame(
         {
             "Сотрудник": labels,

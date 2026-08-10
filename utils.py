@@ -532,13 +532,35 @@ def build_roster_attendance(
     return out
 
 
+def is_report_exempt_role(role: str | None) -> bool:
+    """
+    Директора не сдают норматив, но остаются в списке штата.
+    Ассистент директора — сдаёт (не исключение).
+    """
+    text = _normalize_person_text(role)
+    if not text:
+        return False
+    if "ассистент" in text:
+        return False
+    # генеральный / исполнительный / управляющий / финансовый / … директор, CEO/CFO/…
+    if "директор" in text:
+        return True
+    if any(x in text for x in (" ceo", "ceo ", " cfoo", " cfo", " cmo", " cmso", " coo", " chro")):
+        return True
+    # без пробелов в нормализации — проверить токены
+    tokens = set(text.split())
+    if tokens & {"ceo", "ceoo", "cfo", "cmo", "cmso", "coo", "chro"}:
+        return True
+    return False
+
+
 def build_filled_staffing_with_reports(
     staffing: pd.DataFrame,
     attendance: pd.DataFrame | None,
     submitted: pd.DataFrame | None = None,
     min_score: float = 42.0,
 ) -> pd.DataFrame:
-    """Занятые места штатки + статус сдачи отчёта (вакансии исключены)."""
+    """Занятые места штатки + статус сдачи. Директора в списке, но вне графиков."""
     if staffing is None or staffing.empty:
         return pd.DataFrame(
             columns=[
@@ -562,8 +584,11 @@ def build_filled_staffing_with_reports(
     filled["Категория"] = kpi_category(None)
     filled["Файл"] = ""
     filled["_matched"] = False
+    filled["_exempt"] = filled["Должность"].map(is_report_exempt_role)
+    filled.loc[filled["_exempt"], "Статус"] = "➖ Не обязан"
+    filled.loc[filled["_exempt"], "Категория"] = "➖ Не обязан"
+    filled.loc[filled["_exempt"], "_matched"] = True
 
-    # 1) Прямое сопоставление Excel → место в штатке
     uploads = []
     if submitted is not None and not submitted.empty and "Сотрудник" in submitted.columns:
         for _, row in submitted.iterrows():
@@ -579,6 +604,8 @@ def build_filled_staffing_with_reports(
     pairs: list[tuple[float, int, int]] = []
     for ui, up in enumerate(uploads):
         for ri, row in filled.iterrows():
+            if bool(filled.at[ri, "_exempt"]):
+                continue
             sc = _match_score(up["name"], str(row.get("ФИО") or ""), str(row.get("Должность") or ""))
             if sc >= min_score:
                 pairs.append((sc, ui, int(ri)))
@@ -596,8 +623,6 @@ def build_filled_staffing_with_reports(
         filled.at[ri, "Категория"] = kpi_category(kpi if kpi > 0 else None)
         filled.at[ri, "Файл"] = up["file"]
 
-    # 2) Дополнение из attendance (уникальные ФИО) — только на ещё не отмеченные места
-    #    (одна должность = один отчёт; не размножаем статус на все ставки человека)
     if attendance is not None and not attendance.empty:
         for _, row in attendance.iterrows():
             if str(row.get("Статус") or "") == "❌ Не сдал":
@@ -607,12 +632,13 @@ def build_filled_staffing_with_reports(
             role = str(row.get("Должность") or "")
             payload_status = row.get("Статус") or "✅ Сдал"
             payload_kpi = float(row.get("KPI") or 0)
-            payload_cat = row.get("Категория") or kpi_category(payload_kpi if payload_kpi > 0 else None)
+            payload_cat = row.get("Категория") or kpi_category(
+                payload_kpi if payload_kpi > 0 else None
+            )
             payload_file = row.get("Файл") or ""
-            # берём лучшее незанятое место этого человека / этой должности
             best_ri, best_sc = None, -1.0
             for ri, seat in filled.iterrows():
-                if bool(filled.at[ri, "_matched"]):
+                if bool(filled.at[ri, "_matched"]) or bool(filled.at[ri, "_exempt"]):
                     continue
                 seat_key = _normalize_person_text(str(seat.get("ФИО") or ""))
                 seat_lat = _to_latin_fold(str(seat.get("ФИО") or ""))
@@ -623,8 +649,11 @@ def build_filled_staffing_with_reports(
                     sc = 95.0
                 else:
                     continue
-                # предпочтительнее совпадение должности
-                sc += min(20.0, _match_score(role, str(seat.get("ФИО") or ""), str(seat.get("Должность") or "")) * 0.1)
+                sc += min(
+                    20.0,
+                    _match_score(role, str(seat.get("ФИО") or ""), str(seat.get("Должность") or ""))
+                    * 0.1,
+                )
                 if sc > best_sc:
                     best_sc, best_ri = sc, int(ri)
             if best_ri is not None:
@@ -634,19 +663,21 @@ def build_filled_staffing_with_reports(
                 filled.at[best_ri, "Категория"] = payload_cat
                 filled.at[best_ri, "Файл"] = payload_file
 
-    filled = filled.drop(columns=["_matched"])
-    order = {"✅ Сдал": 0, "⚫ 0%": 1, "❌ Не сдал": 2}
+    filled = filled.drop(columns=["_matched", "_exempt"])
+    order = {"✅ Сдал": 0, "⚫ 0%": 1, "❌ Не сдал": 2, "➖ Не обязан": 3}
     filled["_s"] = filled["Статус"].map(order).fillna(9)
     filled = filled.sort_values(["_s", "№"]).drop(columns=["_s"]).reset_index(drop=True)
 
-    # Счётчики по занятым должностям (местам), не по уникальным ФИО
-    submitted_seats = int((filled["Статус"] != "❌ Не сдал").sum())
-    total_seats = int(len(filled))
+    required = filled[filled["Статус"] != "➖ Не обязан"]
+    submitted_seats = int((required["Статус"] != "❌ Не сдал").sum())
+    total_required = int(len(required))
 
-    filled.attrs["total"] = total_seats
+    filled.attrs["total"] = total_required
     filled.attrs["submitted"] = submitted_seats
-    filled.attrs["missing"] = total_seats - submitted_seats
-    filled.attrs["people_total"] = total_seats  # совместимость: знаменатель диаграмм = должности
+    filled.attrs["missing"] = total_required - submitted_seats
+    filled.attrs["people_total"] = total_required
+    filled.attrs["exempt"] = int((filled["Статус"] == "➖ Не обязан").sum())
+    filled.attrs["seats_filled_all"] = int(len(filled))
     unmatched = [u["name"] for u in uploads if not u["used"] and u["name"]]
     filled.attrs["unmatched_uploads"] = unmatched
     return filled
