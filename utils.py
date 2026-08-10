@@ -219,6 +219,10 @@ def _latin_fuzzy(value: str | None) -> str:
     text = text.replace("ʻ", "").replace("ʼ", "").replace("'", "").replace("`", "")
     repl = (
         ("shch", "sh"),
+        ("ayeva", "aeva"),
+        ("ayev", "aev"),
+        ("yeva", "eva"),
+        ("yev", "ev"),
         ("zh", "j"),
         ("kh", "h"),
         ("gh", "g"),
