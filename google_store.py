@@ -155,25 +155,28 @@ def _headers() -> dict[str, str]:
     return {"Authorization": f"Bearer {_access_token()}"}
 
 
-def _find_file(name: str, parent: str) -> dict | None:
-    q = f"name = '{name}' and '{parent}' in parents and trashed = false"
-    r = requests.get(
-        f"{DRIVE_API}/files",
-        headers=_headers(),
-        params={
-            "q": q,
-            "spaces": "drive",
-            "fields": "files(id,name,mimeType)",
-            "pageSize": 5,
-            "supportsAllDrives": "true",
-            "includeItemsFromAllDrives": "true",
-        },
-        timeout=60,
+DOCS_EDITORS_MIME = {
+    "application/vnd.google-apps.document",
+    "application/vnd.google-apps.spreadsheet",
+    "application/vnd.google-apps.presentation",
+    "application/vnd.google-apps.drawing",
+}
+SHORTCUT_MIME = "application/vnd.google-apps.shortcut"
+
+
+def _empty_store() -> dict:
+    return {"timezone": "Asia/Tashkent", "version": 2, "days": {}}
+
+
+def _file_hint(meta: dict) -> str:
+    fid = meta.get("id") or "?"
+    mime = meta.get("mimeType") or "?"
+    return (
+        f"id={fid}, mime={mime}. "
+        f"Откройте https://drive.google.com/file/d/{fid}/view — "
+        "если это синий Google Документ, удалите и загрузите обычный .json "
+        "(Создать → Загрузка файла)."
     )
-    if r.status_code >= 400:
-        raise RuntimeError(f"Drive list error {r.status_code}: {r.text[:400]}")
-    files = (r.json() or {}).get("files") or []
-    return files[0] if files else None
 
 
 def _get_file_meta(file_id: str) -> dict:
@@ -181,7 +184,7 @@ def _get_file_meta(file_id: str) -> dict:
         f"{DRIVE_API}/files/{file_id}",
         headers=_headers(),
         params={
-            "fields": "id,name,mimeType",
+            "fields": "id,name,mimeType,shortcutDetails",
             "supportsAllDrives": "true",
         },
         timeout=60,
@@ -191,38 +194,130 @@ def _get_file_meta(file_id: str) -> dict:
     return r.json()
 
 
-def _download_file_bytes(file_meta: dict) -> bytes:
-    file_id = file_meta["id"]
-    mime = (file_meta.get("mimeType") or "").strip()
-
-    # Обычный загруженный файл (json/txt)
-    if not mime.startswith("application/vnd.google-apps."):
-        r = requests.get(
-            f"{DRIVE_API}/files/{file_id}",
-            headers=_headers(),
-            params={"alt": "media", "supportsAllDrives": "true"},
-            timeout=60,
+def _resolve_meta(meta: dict) -> dict:
+    """Разворачивает ярлык Google Drive до целевого файла."""
+    mime = (meta.get("mimeType") or "").strip()
+    if mime != SHORTCUT_MIME:
+        return meta
+    target = (meta.get("shortcutDetails") or {}).get("targetId")
+    if not target:
+        raise RuntimeError(
+            "shared_kpi.json — ярлык без цели. Удалите ярлык и "
+            f"загрузите обычный .json. ({_file_hint(meta)})"
         )
-        if r.status_code >= 400:
-            raise RuntimeError(f"Drive download error {r.status_code}: {r.text[:400]}")
-        return r.content
+    return _get_file_meta(target)
 
-    # Google Docs / ошибочно созданный «документ» — только export
-    export_mime = "text/plain"
+
+def _list_named_files(name: str, parent: str) -> list[dict]:
+    q = f"name = '{name}' and '{parent}' in parents and trashed = false"
     r = requests.get(
-        f"{DRIVE_API}/files/{file_id}/export",
+        f"{DRIVE_API}/files",
         headers=_headers(),
-        params={"mimeType": export_mime},
+        params={
+            "q": q,
+            "spaces": "drive",
+            "fields": "files(id,name,mimeType,shortcutDetails)",
+            "pageSize": 20,
+            "supportsAllDrives": "true",
+            "includeItemsFromAllDrives": "true",
+        },
         timeout=60,
     )
     if r.status_code >= 400:
-        raise RuntimeError(
-            "Файл shared_kpi.json создан как Google Документ. "
-            "Удалите его и загрузите обычный файл .json через "
-            "Drive → Создать → Загрузка файла. "
-            f"({r.status_code}: {r.text[:200]})"
-        )
+        raise RuntimeError(f"Drive list error {r.status_code}: {r.text[:400]}")
+    return list((r.json() or {}).get("files") or [])
+
+
+def _pick_best_file(candidates: list[dict]) -> dict | None:
+    """Предпочитает бинарный .json; пропускает папки; разворачивает ярлыки."""
+    if not candidates:
+        return None
+
+    resolved: list[dict] = []
+    for raw in candidates:
+        mime = (raw.get("mimeType") or "").strip()
+        if mime == "application/vnd.google-apps.folder":
+            continue
+        try:
+            resolved.append(_resolve_meta(raw))
+        except RuntimeError:
+            continue
+
+    if not resolved:
+        return None
+
+    def score(meta: dict) -> int:
+        mime = (meta.get("mimeType") or "").strip()
+        if mime in ("application/json", "application/octet-stream", "text/plain", "text/json"):
+            return 0
+        if not mime.startswith("application/vnd.google-apps."):
+            return 1
+        if mime in DOCS_EDITORS_MIME:
+            return 5
+        return 9
+
+    resolved.sort(key=score)
+    return resolved[0]
+
+
+def _find_store_file() -> dict | None:
+    file_id = _configured_file_id()
+    if file_id:
+        return _resolve_meta(_get_file_meta(file_id))
+    return _pick_best_file(_list_named_files(FILE_NAME, folder_id()))
+
+
+def _download_media(file_id: str) -> bytes:
+    r = requests.get(
+        f"{DRIVE_API}/files/{file_id}",
+        headers=_headers(),
+        params={"alt": "media", "supportsAllDrives": "true"},
+        timeout=60,
+    )
+    if r.status_code >= 400:
+        raise RuntimeError(f"Drive download error {r.status_code}: {r.text[:400]}")
     return r.content
+
+
+def _download_export(file_id: str) -> bytes:
+    last_err = ""
+    for export_mime in ("text/plain", "application/json"):
+        r = requests.get(
+            f"{DRIVE_API}/files/{file_id}/export",
+            headers=_headers(),
+            params={"mimeType": export_mime},
+            timeout=60,
+        )
+        if r.status_code < 400:
+            return r.content
+        last_err = f"{r.status_code}: {r.text[:200]}"
+    raise RuntimeError(f"Drive export error {last_err}")
+
+
+def _download_file_bytes(file_meta: dict) -> bytes:
+    meta = _resolve_meta(file_meta)
+    file_id = meta["id"]
+    mime = (meta.get("mimeType") or "").strip()
+
+    # Обычный загруженный файл
+    if not mime.startswith("application/vnd.google-apps."):
+        return _download_media(file_id)
+
+    # Настоящий Google Docs / Sheets — export
+    if mime in DOCS_EDITORS_MIME:
+        try:
+            return _download_export(file_id)
+        except RuntimeError as exc:
+            raise RuntimeError(
+                "shared_kpi.json — Google Документ/таблица, а нужен обычный файл .json. "
+                f"Удалите синий документ и загрузите файл через «Загрузка файла». "
+                f"({_file_hint(meta)}; {exc})"
+            ) from exc
+
+    raise RuntimeError(
+        "shared_kpi.json имеет тип Google Apps, который нельзя скачать как JSON. "
+        f"Удалите его и загрузите обычный .json. ({_file_hint(meta)})"
+    )
 
 
 def _configured_file_id() -> str | None:
@@ -237,52 +332,67 @@ def _configured_file_id() -> str | None:
     return os.getenv("GOOGLE_DRIVE_FILE_ID", "").strip() or None
 
 
+def _require_binary_json(meta: dict) -> dict:
+    meta = _resolve_meta(meta)
+    mime = (meta.get("mimeType") or "").strip()
+    if mime.startswith("application/vnd.google-apps."):
+        raise RuntimeError(
+            "Сейчас в папке синий Google Документ (или ярлык), а приложению нужен "
+            "обычный файл shared_kpi.json. "
+            "1) Удалите ВСЕ файлы с именем shared_kpi.json. "
+            "2) На компьютере создайте текстовый файл shared_kpi.json "
+            'со строкой {"timezone":"Asia/Tashkent","version":2,"days":{}}. '
+            "3) В Drive: Создать → Загрузка файла (не Google Документы). "
+            f"({_file_hint(meta)})"
+        )
+    return meta
+
+
 def load_store_dict() -> dict:
     """Читает shared_kpi.json из папки Drive."""
-    file_id = _configured_file_id()
-    if file_id:
-        meta = _get_file_meta(file_id)
-    else:
-        meta = _find_file(FILE_NAME, folder_id())
+    meta = _find_store_file()
     if not meta:
-        return {"timezone": "Asia/Tashkent", "version": 2, "days": {}}
+        return _empty_store()
+
+    # Google Doc нельзя нормально использовать как shared store —
+    # не маскируем пустым JSON, сразу понятная ошибка.
+    mime = (meta.get("mimeType") or "").strip()
+    if mime in DOCS_EDITORS_MIME or mime == SHORTCUT_MIME:
+        _require_binary_json(meta)
 
     raw = _download_file_bytes(meta)
     try:
-        payload = json.loads(raw.decode("utf-8"))
+        text = raw.decode("utf-8-sig").strip()
+        # Docs export иногда оборачивает текст лишним мусором
+        start, end = text.find("{"), text.rfind("}")
+        if start >= 0 and end > start:
+            text = text[start : end + 1]
+        payload = json.loads(text)
     except Exception:
         payload = {}
     if not isinstance(payload, dict) or "days" not in payload:
-        return {"timezone": "Asia/Tashkent", "version": 2, "days": {}}
+        return _empty_store()
     return payload
 
 
 def save_store_dict(store: dict) -> dict[str, Any]:
     """
     Обновляет existing shared_kpi.json (бинарный файл).
-    Google Doc не подходит — нужен обычный загруженный .json.
+    Google Doc / ярлык не подходят — нужен обычный загруженный .json.
     """
     data = json.dumps(store, ensure_ascii=False, indent=2).encode("utf-8")
-    file_id = _configured_file_id()
-    if file_id:
-        existing = _get_file_meta(file_id)
-    else:
-        existing = _find_file(FILE_NAME, folder_id())
+    existing = _find_store_file()
 
     if not existing:
         raise RuntimeError(
             "В папке Drive нет файла shared_kpi.json. "
-            "Загрузите обычный файл shared_kpi.json "
+            "Создайте на компьютере файл shared_kpi.json "
             '(содержимое: {"timezone":"Asia/Tashkent","version":2,"days":{}}) '
-            "через «Загрузка файла», не через Google Документы."
+            "и загрузите через Drive → Создать → Загрузка файла "
+            "(не через Google Документы)."
         )
 
-    mime = (existing.get("mimeType") or "").strip()
-    if mime.startswith("application/vnd.google-apps."):
-        raise RuntimeError(
-            "shared_kpi.json сейчас Google Документ. Удалите его и загрузите "
-            "обычный .json файл: Drive → Создать → Загрузка файла → выберите shared_kpi.json"
-        )
+    existing = _require_binary_json(existing)
 
     r = requests.patch(
         f"{UPLOAD_API}/files/{existing['id']}",
