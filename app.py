@@ -307,8 +307,9 @@ except Exception as exc:
 
 if shared_error:
     st.warning(
-        "Google Drive пока недоступен. Проверьте Secrets и доступ папки "
-        "для `akela-streamlit@...` (Редактор).\n\n"
+        "Google Drive пока недоступен. Нужен обычный файл `shared_kpi.json` "
+        "(Загрузка файла, не Google Документ), папка с доступом "
+        "Редактор для `akela-streamlit@...`, и корректные Secrets.\n\n"
         f"`{shared_error}`"
     )
 
@@ -351,7 +352,8 @@ if uploaded_files and st.button("Показать всем", type="primary"):
     except Exception as exc:
         st.error(
             "Не удалось сохранить в Google Drive. "
-            "Проверьте Secrets и что папка расшарена на сервисный аккаунт.\n\n"
+            "Файл `shared_kpi.json` должен быть обычной загрузкой "
+            "(не Google Документ), папка — с правом Редактор для сервисного аккаунта.\n\n"
             f"`{exc}`"
         )
         st.stop()

@@ -163,7 +163,7 @@ def _find_file(name: str, parent: str) -> dict | None:
         params={
             "q": q,
             "spaces": "drive",
-            "fields": "files(id,name)",
+            "fields": "files(id,name,mimeType)",
             "pageSize": 5,
             "supportsAllDrives": "true",
             "includeItemsFromAllDrives": "true",
@@ -174,6 +174,55 @@ def _find_file(name: str, parent: str) -> dict | None:
         raise RuntimeError(f"Drive list error {r.status_code}: {r.text[:400]}")
     files = (r.json() or {}).get("files") or []
     return files[0] if files else None
+
+
+def _get_file_meta(file_id: str) -> dict:
+    r = requests.get(
+        f"{DRIVE_API}/files/{file_id}",
+        headers=_headers(),
+        params={
+            "fields": "id,name,mimeType",
+            "supportsAllDrives": "true",
+        },
+        timeout=60,
+    )
+    if r.status_code >= 400:
+        raise RuntimeError(f"Drive meta error {r.status_code}: {r.text[:400]}")
+    return r.json()
+
+
+def _download_file_bytes(file_meta: dict) -> bytes:
+    file_id = file_meta["id"]
+    mime = (file_meta.get("mimeType") or "").strip()
+
+    # Обычный загруженный файл (json/txt)
+    if not mime.startswith("application/vnd.google-apps."):
+        r = requests.get(
+            f"{DRIVE_API}/files/{file_id}",
+            headers=_headers(),
+            params={"alt": "media", "supportsAllDrives": "true"},
+            timeout=60,
+        )
+        if r.status_code >= 400:
+            raise RuntimeError(f"Drive download error {r.status_code}: {r.text[:400]}")
+        return r.content
+
+    # Google Docs / ошибочно созданный «документ» — только export
+    export_mime = "text/plain"
+    r = requests.get(
+        f"{DRIVE_API}/files/{file_id}/export",
+        headers=_headers(),
+        params={"mimeType": export_mime},
+        timeout=60,
+    )
+    if r.status_code >= 400:
+        raise RuntimeError(
+            "Файл shared_kpi.json создан как Google Документ. "
+            "Удалите его и загрузите обычный файл .json через "
+            "Drive → Создать → Загрузка файла. "
+            f"({r.status_code}: {r.text[:200]})"
+        )
+    return r.content
 
 
 def _configured_file_id() -> str | None:
@@ -191,29 +240,18 @@ def _configured_file_id() -> str | None:
 def load_store_dict() -> dict:
     """Читает shared_kpi.json из папки Drive."""
     file_id = _configured_file_id()
-    meta = None
     if file_id:
-        meta = {"id": file_id, "name": FILE_NAME}
+        meta = _get_file_meta(file_id)
     else:
         meta = _find_file(FILE_NAME, folder_id())
     if not meta:
         return {"timezone": "Asia/Tashkent", "version": 2, "days": {}}
 
-    r = requests.get(
-        f"{DRIVE_API}/files/{meta['id']}",
-        headers=_headers(),
-        params={"alt": "media", "supportsAllDrives": "true"},
-        timeout=60,
-    )
-    if r.status_code >= 400:
-        raise RuntimeError(f"Drive download error {r.status_code}: {r.text[:400]}")
+    raw = _download_file_bytes(meta)
     try:
-        payload = r.json()
+        payload = json.loads(raw.decode("utf-8"))
     except Exception:
-        try:
-            payload = json.loads(r.content.decode("utf-8"))
-        except Exception:
-            payload = {}
+        payload = {}
     if not isinstance(payload, dict) or "days" not in payload:
         return {"timezone": "Asia/Tashkent", "version": 2, "days": {}}
     return payload
@@ -221,27 +259,34 @@ def load_store_dict() -> dict:
 
 def save_store_dict(store: dict) -> dict[str, Any]:
     """
-    Обновляет existing shared_kpi.json.
-    Создавать файл сервисным аккаунтом нельзя (нет квоты) —
-    файл должен заранее создать человек в Drive и расшарить на SA.
+    Обновляет existing shared_kpi.json (бинарный файл).
+    Google Doc не подходит — нужен обычный загруженный .json.
     """
     data = json.dumps(store, ensure_ascii=False, indent=2).encode("utf-8")
     file_id = _configured_file_id()
-    existing = {"id": file_id, "name": FILE_NAME} if file_id else _find_file(FILE_NAME, folder_id())
-    headers = _headers()
+    if file_id:
+        existing = _get_file_meta(file_id)
+    else:
+        existing = _find_file(FILE_NAME, folder_id())
 
     if not existing:
         raise RuntimeError(
             "В папке Drive нет файла shared_kpi.json. "
-            "Создайте его вручную в вашей папке (содержимое: "
-            '{"timezone":"Asia/Tashkent","version":2,"days":{}} ), '
-            "расшарьте папку на akela-streamlit@... как Редактор, "
-            "затем повторите загрузку."
+            "Загрузите обычный файл shared_kpi.json "
+            '(содержимое: {"timezone":"Asia/Tashkent","version":2,"days":{}}) '
+            "через «Загрузка файла», не через Google Документы."
+        )
+
+    mime = (existing.get("mimeType") or "").strip()
+    if mime.startswith("application/vnd.google-apps."):
+        raise RuntimeError(
+            "shared_kpi.json сейчас Google Документ. Удалите его и загрузите "
+            "обычный .json файл: Drive → Создать → Загрузка файла → выберите shared_kpi.json"
         )
 
     r = requests.patch(
         f"{UPLOAD_API}/files/{existing['id']}",
-        headers={**headers, "Content-Type": "application/json"},
+        headers={**_headers(), "Content-Type": "application/json"},
         params={"uploadType": "media", "supportsAllDrives": "true"},
         data=data,
         timeout=60,
