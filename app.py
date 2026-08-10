@@ -441,15 +441,15 @@ if not filled_staff.empty or not vacancies.empty or not roster.empty:
     st.markdown('<p class="akela-section-label">Штат</p>', unsafe_allow_html=True)
     s1, s2, s3, s4 = st.columns(4)
     s1.metric("Рабочих мест", seats_total or "—")
-    s2.metric("В списке (занято)", seats_filled)
+    s2.metric("Должностей (сдать отчёт)", seats_filled)
     s3.metric("Сдали отчёт", sub_n)
     s4.metric("Не сдали", miss_n)
-    people_total = int(filled_staff.attrs.get("people_total") or 0) if not filled_staff.empty else 0
+    denom = int(filled_staff.attrs.get("people_total") or seats_filled or 0)
     st.caption(
-        f"Сдали {people_rate:.0f}% от сотрудников"
-        + (f" ({people_total} чел.)" if people_total else "")
+        f"Сдали {people_rate:.0f}% от занятых должностей"
+        + (f" ({denom})" if denom else "")
         + (f" · вакансий отдельно: {seats_vacant}" if seats_vacant else "")
-        + (f" · юклатилган: {seats_yuk}" if seats_yuk else "")
+        + (f" · юклатилган учтены: {seats_yuk}" if seats_yuk else "")
     )
 
     status_filter = st.radio(
@@ -534,17 +534,20 @@ if has_uploads:
             lambda x: kpi_category(float(x) if x is not None else None)
         )
 else:
-    # сплошной чёрный «не сдал» по уникальным сотрудникам штата
-    people_n = int(
-        filled_staff.attrs.get("people_total")
-        or (filled_staff["ФИО"].nunique() if not filled_staff.empty else 0)
-        or 1
-    )
+    # сплошной чёрный «не сдал» по занятым должностям штата
+    if not filled_staff.empty:
+        labels = [
+            f"{str(r.get('Должность') or '').strip()} · {str(r.get('ФИО') or '').strip()}".strip(" ·")
+            for _, r in filled_staff.iterrows()
+        ]
+    else:
+        labels = ["Должность 1"]
+    seats_n = len(labels)
     chart_df = pd.DataFrame(
         {
-            "Сотрудник": [f"Сотрудник {i+1}" for i in range(people_n)],
-            "KPI": [0.0] * people_n,
-            "Категория": ["⚫ 0 / не сдал"] * people_n,
+            "Сотрудник": labels,
+            "KPI": [0.0] * seats_n,
+            "Категория": ["⚫ 0 / не сдал"] * seats_n,
         }
     )
 

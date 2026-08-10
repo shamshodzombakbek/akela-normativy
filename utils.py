@@ -596,59 +596,57 @@ def build_filled_staffing_with_reports(
         filled.at[ri, "Категория"] = kpi_category(kpi if kpi > 0 else None)
         filled.at[ri, "Файл"] = up["file"]
 
-        # тот же человек на других местах — тоже отмечаем
-        fio_key = _normalize_person_text(str(filled.at[ri, "ФИО"] or ""))
-        if fio_key:
-            for rj, other in filled.iterrows():
-                if bool(filled.at[rj, "_matched"]):
-                    continue
-                if _normalize_person_text(str(other.get("ФИО") or "")) == fio_key:
-                    filled.at[rj, "_matched"] = True
-                    filled.at[rj, "Статус"] = filled.at[ri, "Статус"]
-                    filled.at[rj, "KPI"] = filled.at[ri, "KPI"]
-                    filled.at[rj, "Категория"] = filled.at[ri, "Категория"]
-                    filled.at[rj, "Файл"] = filled.at[ri, "Файл"]
-
-    # 2) Дополнение из attendance (уникальные ФИО), если прямого матча не было
+    # 2) Дополнение из attendance (уникальные ФИО) — только на ещё не отмеченные места
+    #    (одна должность = один отчёт; не размножаем статус на все ставки человека)
     if attendance is not None and not attendance.empty:
         for _, row in attendance.iterrows():
             if str(row.get("Статус") or "") == "❌ Не сдал":
                 continue
             fio_key = _normalize_person_text(str(row.get("ФИО") or ""))
             lat = _to_latin_fold(str(row.get("ФИО") or ""))
+            role = str(row.get("Должность") or "")
             payload_status = row.get("Статус") or "✅ Сдал"
             payload_kpi = float(row.get("KPI") or 0)
             payload_cat = row.get("Категория") or kpi_category(payload_kpi if payload_kpi > 0 else None)
             payload_file = row.get("Файл") or ""
+            # берём лучшее незанятое место этого человека / этой должности
+            best_ri, best_sc = None, -1.0
             for ri, seat in filled.iterrows():
                 if bool(filled.at[ri, "_matched"]):
                     continue
                 seat_key = _normalize_person_text(str(seat.get("ФИО") or ""))
                 seat_lat = _to_latin_fold(str(seat.get("ФИО") or ""))
-                if (seat_key and seat_key == fio_key) or (lat and seat_lat == lat):
-                    filled.at[ri, "_matched"] = True
-                    filled.at[ri, "Статус"] = payload_status
-                    filled.at[ri, "KPI"] = payload_kpi
-                    filled.at[ri, "Категория"] = payload_cat
-                    filled.at[ri, "Файл"] = payload_file
+                sc = 0.0
+                if fio_key and seat_key == fio_key:
+                    sc = 100.0
+                elif lat and seat_lat == lat:
+                    sc = 95.0
+                else:
+                    continue
+                # предпочтительнее совпадение должности
+                sc += min(20.0, _match_score(role, str(seat.get("ФИО") or ""), str(seat.get("Должность") or "")) * 0.1)
+                if sc > best_sc:
+                    best_sc, best_ri = sc, int(ri)
+            if best_ri is not None:
+                filled.at[best_ri, "_matched"] = True
+                filled.at[best_ri, "Статус"] = payload_status
+                filled.at[best_ri, "KPI"] = payload_kpi
+                filled.at[best_ri, "Категория"] = payload_cat
+                filled.at[best_ri, "Файл"] = payload_file
 
     filled = filled.drop(columns=["_matched"])
     order = {"✅ Сдал": 0, "⚫ 0%": 1, "❌ Не сдал": 2}
     filled["_s"] = filled["Статус"].map(order).fillna(9)
     filled = filled.sort_values(["_s", "№"]).drop(columns=["_s"]).reset_index(drop=True)
 
-    # Счётчики по уникальным людям (не по числу должностей одного человека)
-    people = filled.copy()
-    people["_key"] = people["ФИО"].map(_normalize_person_text)
-    people = people[people["_key"] != ""]
-    unique = people.drop_duplicates("_key", keep="first")
-    submitted_people = int((unique["Статус"] != "❌ Не сдал").sum())
-    total_people = int(len(unique))
+    # Счётчики по занятым должностям (местам), не по уникальным ФИО
+    submitted_seats = int((filled["Статус"] != "❌ Не сдал").sum())
+    total_seats = int(len(filled))
 
-    filled.attrs["total"] = len(filled)
-    filled.attrs["submitted"] = submitted_people
-    filled.attrs["missing"] = total_people - submitted_people
-    filled.attrs["people_total"] = total_people
+    filled.attrs["total"] = total_seats
+    filled.attrs["submitted"] = submitted_seats
+    filled.attrs["missing"] = total_seats - submitted_seats
+    filled.attrs["people_total"] = total_seats  # совместимость: знаменатель диаграмм = должности
     unmatched = [u["name"] for u in uploads if not u["used"] and u["name"]]
     filled.attrs["unmatched_uploads"] = unmatched
     return filled
