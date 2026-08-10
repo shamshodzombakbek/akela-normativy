@@ -213,6 +213,32 @@ def _to_latin_fold(value: str | None) -> str:
     return "".join(_CYR_LAT.get(ch, ch) for ch in text)
 
 
+def _latin_fuzzy(value: str | None) -> str:
+    """Уравнивает частые варианты латиницы (zh/j, kh/h, ' апострофы)."""
+    text = _to_latin_fold(value)
+    text = text.replace("ʻ", "").replace("ʼ", "").replace("'", "").replace("`", "")
+    repl = (
+        ("shch", "sh"),
+        ("zh", "j"),
+        ("kh", "h"),
+        ("gh", "g"),
+        ("ts", "c"),
+        ("yo", "e"),
+        ("yu", "u"),
+        ("ya", "a"),
+        ("iy", "i"),
+        ("yy", "y"),
+    )
+    for a, b in repl:
+        text = text.replace(a, b)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def _latin_tokens(value: str | None) -> set[str]:
+    return {t for t in _latin_fuzzy(value).split() if len(t) > 1}
+
+
 def _tokens(value: str | None) -> set[str]:
     return {t for t in _normalize_person_text(value).split() if len(t) > 1}
 
@@ -220,7 +246,8 @@ def _tokens(value: str | None) -> set[str]:
 def _token_variants(value: str | None) -> set[str]:
     raw = _tokens(value)
     lat = {t for t in _to_latin_fold(value).split() if len(t) > 1}
-    return raw | lat
+    fuzzy = _latin_tokens(value)
+    return raw | lat | fuzzy
 
 
 def load_staffing(path: str | Path | None = None) -> pd.DataFrame:
@@ -395,17 +422,36 @@ def _match_score(upload_name: str, fio: str, role: str) -> float:
     f = _normalize_person_text(fio)
     r = _normalize_person_text(role)
     u_lat, f_lat, r_lat = _to_latin_fold(upload_name), _to_latin_fold(fio), _to_latin_fold(role)
+    u_fuzzy, f_fuzzy = _latin_fuzzy(upload_name), _latin_fuzzy(fio)
     u_role, r_role = role_fold(upload_name), role_fold(role)
     if not u:
         return 0.0
 
     score = 0.0
-    if u == f or u_lat == f_lat:
+    if u == f or u_lat == f_lat or u_fuzzy == f_fuzzy:
         return 100.0
     if r and (u == r or u_lat == r_lat):
         return 92.0
     if u_role and r_role and u_role == r_role:
         return 95.0
+
+    # Имя / фамилия: латиница ↔ кириллица
+    u_name_toks = _latin_tokens(upload_name)
+    f_name_toks = _latin_tokens(fio)
+    u_parts = [t for t in u_fuzzy.split() if len(t) > 1]
+    f_parts = [t for t in f_fuzzy.split() if len(t) > 1]
+    if u_parts and f_parts:
+        if u_parts[0] == f_parts[0] and len(u_parts[0]) >= 4:
+            score = max(score, 88.0 if len(u_parts) == 1 else 96.0)
+        if len(u_parts) == 1 and u_parts[0] in f_name_toks and len(u_parts[0]) >= 4:
+            score = max(score, 80.0)
+        if u_name_toks and u_name_toks <= f_name_toks:
+            score = max(score, 94.0 if len(u_name_toks) >= 2 else 80.0)
+        elif u_name_toks and f_name_toks:
+            overlap_n = len(u_name_toks & f_name_toks) / max(len(u_name_toks), 1)
+            if overlap_n >= 0.5:
+                score = max(score, 70.0 + 28.0 * overlap_n)
+
     # ofis + administrator ↔ офис-менеджер / офис администратор
     if {"ofis", "office"} & set(u_lat.split()) and "administr" in u_lat.replace(" ", ""):
         if "офис" in r and ("менеджер" in r or "администратор" in r or "админ" in r):
@@ -430,7 +476,13 @@ def _match_score(upload_name: str, fio: str, role: str) -> float:
         if longest in ut and len(longest) >= 4:
             score = max(score, 78.0)
 
-    if ft and ut:
+    if u_name_toks and f_name_toks:
+        overlap_f = len(u_name_toks & f_name_toks) / max(len(f_name_toks), 1)
+        if overlap_f >= 0.66:
+            score = max(score, 70.0 + 25.0 * overlap_f)
+        elif overlap_f >= 0.34:
+            score = max(score, 55.0 + 20.0 * overlap_f)
+    elif ft and ut:
         overlap_f = len(ut & ft) / max(len(ft), 1)
         if overlap_f >= 0.66:
             score = max(score, 70.0 + 25.0 * overlap_f)
