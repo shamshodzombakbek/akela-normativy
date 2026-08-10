@@ -432,12 +432,13 @@ def _match_score(upload_name: str, fio: str, role: str) -> float:
         return 0.0
 
     score = 0.0
+    # Полное совпадение ФИО — сразу; роль сверяем с линейками (не early-return без delta)
     if u == f or u_lat == f_lat or u_fuzzy == f_fuzzy:
         return 100.0
     if r and (u == r or u_lat == r_lat):
-        return 92.0
+        score = 92.0
     if u_role and r_role and u_role == r_role:
-        return 95.0
+        score = max(score, 95.0)
 
     # Имя / фамилия: латиница ↔ кириллица
     u_name_toks = _latin_tokens(upload_name)
@@ -542,12 +543,7 @@ def _sales_line_delta(upload_name: str | None, role: str | None) -> float:
     if u_prod and r_prod:
         delta += 18.0
 
-    lines = (
-        ("print", "pack", "print & pack", "print and pack"),
-        ("plast", "pack", "plast & pack", "plast and pack"),
-        ("metalwork", "metal work", "metal"),
-    )
-    # PRINT & PACK vs PLAST & PACK vs METALWORK
+    # PRINT & PACK vs PLAST & PACK vs METALWORK / WOODWORK
     def line_id(blob: str) -> str | None:
         if "print" in blob and "pack" in blob:
             return "print_pack"
@@ -555,6 +551,8 @@ def _sales_line_delta(upload_name: str | None, role: str | None) -> float:
             return "plast_pack"
         if "metalwork" in blob or ("metal" in blob and "work" in blob):
             return "metalwork"
+        if "woodwork" in blob or ("wood" in blob and "work" in blob):
+            return "woodwork"
         if "metal" in blob and "pack" not in blob and "print" not in blob:
             return "metalwork"
         return None
@@ -562,18 +560,36 @@ def _sales_line_delta(upload_name: str | None, role: str | None) -> float:
     lu, lr = line_id(blob_u), line_id(blob_r)
     if lu and lr:
         if lu == lr:
-            delta += 22.0
+            delta += 28.0
         else:
-            delta -= 45.0
+            delta -= 55.0
+    elif lu and not lr:
+        # в файле указана линейка — место без линейки не берём
+        delta -= 40.0
 
     u_buy, r_buy = has("zakup", "xarid", "закуп", " заку")
     u_sale, r_sale = has("sotuv", "sales", "продаж", "продажа")
     if u_sale and r_buy and not r_sale:
-        delta -= 50.0
+        delta -= 55.0
     if u_buy and r_sale and not r_buy:
-        delta -= 50.0
+        delta -= 55.0
+    if u_sale and not r_sale and not r_buy:
+        # «создание продукта» ≠ продажи
+        delta -= 45.0
+    if u_buy and not r_buy:
+        delta -= 45.0
     if (u_sale and r_sale) or (u_buy and r_buy):
         delta += 12.0
+
+    # Менеджер ≠ начальник отдела
+    u_mgr, r_mgr = has("menejer", "manager", "менеджер")
+    u_boss, r_boss = has("nachalnik", "nachal", "начальник", "boshliq")
+    if u_mgr and not u_boss and r_boss:
+        delta -= 60.0
+    if u_boss and not u_mgr and r_mgr and not r_boss:
+        delta -= 60.0
+    if u_mgr and r_mgr and not r_boss:
+        delta += 16.0
 
     return delta
 
