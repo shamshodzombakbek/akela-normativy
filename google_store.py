@@ -46,25 +46,70 @@ def is_google_configured() -> bool:
     return os.path.isfile(os.path.join(os.path.dirname(__file__), "google_service_account.json"))
 
 
+def _repair_service_account_json(text: str) -> str:
+    """Чинит частую ошибку: живые переносы строк внутри private_key."""
+    import re
+
+    text = text.strip()
+    if text.startswith("\ufeff"):
+        text = text.lstrip("\ufeff")
+
+    pattern = re.compile(
+        r'"private_key"\s*:\s*"(-----BEGIN PRIVATE KEY-----)([\s\S]*?)(-----END PRIVATE KEY-----)\\n?"',
+        re.MULTILINE,
+    )
+
+    def _repl(match: re.Match) -> str:
+        begin, middle, end = match.group(1), match.group(2), match.group(3)
+        middle = middle.replace("\r\n", "\n").replace("\r", "\n")
+        # убрать уже экранированные \n, затем все реальные переносы → \n
+        middle = middle.replace("\\n", "\n")
+        middle = middle.replace("\n", "\\n")
+        return f'"private_key": "{begin}{middle}{end}\\n"'
+
+    repaired = pattern.sub(_repl, text)
+    return repaired
+
+
 def _service_account_info() -> dict:
+    raw_text = None
     try:
         import streamlit as st
 
         if hasattr(st, "secrets"):
             if "google_service_account" in st.secrets:
                 section = st.secrets["google_service_account"]
-                return {k: section[k] for k in section}
+                info = {k: section[k] for k in section}
+                if "private_key" in info and isinstance(info["private_key"], str):
+                    info["private_key"] = info["private_key"].replace("\\n", "\n")
+                return info
             raw = st.secrets.get("GOOGLE_SERVICE_ACCOUNT_JSON")
-            if raw:
-                return json.loads(raw) if isinstance(raw, str) else dict(raw)
+            if raw is not None:
+                if isinstance(raw, dict):
+                    return dict(raw)
+                raw_text = str(raw)
     except Exception as exc:
-        raise RuntimeError(f"Не удалось прочитать Secrets Google: {exc}") from exc
+                raise RuntimeError(f"Не удалось прочитать Secrets Google: {exc}") from exc
 
-    path = os.path.join(os.path.dirname(__file__), "google_service_account.json")
-    if os.path.isfile(path):
-        with open(path, encoding="utf-8") as f:
-            return json.load(f)
-    raise RuntimeError("Нет ключа Google service account в Secrets.")
+    if raw_text is None:
+        path = os.path.join(os.path.dirname(__file__), "google_service_account.json")
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as f:
+                return json.load(f)
+        raise RuntimeError("Нет ключа Google service account в Secrets.")
+
+    try:
+        return json.loads(raw_text)
+    except json.JSONDecodeError:
+        repaired = _repair_service_account_json(raw_text)
+        try:
+            return json.loads(repaired)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(
+                "JSON ключа Google повреждён (часто из‑за переноса private_key). "
+                "Вставьте файл ключа целиком, не разбивая private_key на строки. "
+                f"Детали: {exc}"
+            ) from exc
 
 
 def _access_token() -> str:
