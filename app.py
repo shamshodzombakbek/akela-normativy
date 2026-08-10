@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 import os
 
@@ -6,7 +6,7 @@ import pandas as pd
 import streamlit as st
 import plotly.express as px
 
-from utils import load_excel_reports_from_dir
+from utils import load_uploaded_employees
 
 ROOT = Path(__file__).resolve().parent
 LOGO_PATH = ROOT / "assets" / "akela-logo.png"
@@ -284,20 +284,15 @@ PLOTLY_LAYOUT = dict(
     colorway=["#3E4197", "#1F7A4C", "#B7791F", "#C53030", "#7A8B9C", "#1A2332"],
 )
 
-st.markdown('<p class="akela-section-label">Отчёты по нормативам</p>', unsafe_allow_html=True)
+st.markdown('<p class="akela-section-label">Загрузка Excel</p>', unsafe_allow_html=True)
 
-from schedule import (
-    active_window_day,
-    bitrix_target_day,
-    is_fetch_window,
-    now_tashkent,
-    status_label,
-)
+from schedule import active_window_day, now_tashkent
 from shared_store import load_day, publish_day_snapshot
+
+# Битрикс24-режим сохранён в git (commit 852064e) — временно только Excel.
 
 now = now_tashkent()
 current_slot = active_window_day(now)
-st.caption(status_label(now))
 
 shared_error = None
 available_days: list = []
@@ -309,92 +304,106 @@ except Exception as exc:
 
 if shared_error:
     st.warning(
-        "Не удалось прочитать хранилище. На Cloud добавьте секрет `BITRIX_WEBHOOK_URL`.\n\n"
+        "Общая таблица недоступна без `BITRIX_WEBHOOK_URL` (Secrets / .env). "
+        "Локально файлы всё равно сохранятся на этом компьютере.\n\n"
         f"`{shared_error}`"
     )
 
-# Выбор дня: текущий слот + архив (без повторной загрузки из Битрикс)
-day_options = sorted({current_slot, *available_days}, reverse=True)
-if not day_options:
-    day_options = [current_slot]
+if not _is_streamlit_cloud():
+    st.caption("Файлы сохраняются на этом ПК: `downloads/uploads/Имя/дата_время/`.")
+else:
+    st.caption("На сайте все загрузки видны в общей таблице (Диск Битрикс). Битрикс24-автозагрузку вернём позже.")
 
-selected_day = st.selectbox(
-    "День (слот 16:00–20:00)",
-    day_options,
-    format_func=lambda d: (
-        f"{d.strftime('%d.%m.%Y')}"
-        + (" · сегодня" if d == current_slot else " · архив")
-    ),
-    index=0,
+uploader_name = st.text_input(
+    "Ваше имя (чтобы было видно, кто загрузил)",
+    placeholder="Например: Шамшодбек",
 )
 
-bitrix_ok, bitrix_hint = _bitrix_browser_ready()
-in_window = is_fetch_window(now) and selected_day == current_slot
+uploaded_files = st.file_uploader(
+    "Excel-отчёты",
+    type=["xlsx", "xls"],
+    accept_multiple_files=True,
+    label_visibility="collapsed",
+)
 
-if in_window and bitrix_ok:
-    st.info(
-        f"Окно обновления открыто. Битрикс за "
-        f"**{bitrix_target_day(selected_day).strftime('%d.%m.%Y')}** "
-        f"(вчера относительно слота)."
-    )
-    if st.button("Обновить сейчас из Битрикс24", type="primary"):
-        with st.spinner("Скачиваю Normativ из Битрикс…"):
+if uploaded_files:
+    if not uploader_name.strip():
+        st.warning("Укажите имя — так будет видно, кто загрузил файлы.")
+    elif st.button("Сохранить загрузку", type="primary"):
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        safe_user = "".join(
+            ch if ch.isalnum() or ch in "._- " else "_" for ch in uploader_name.strip()
+        )[:60]
+        local_dir = ROOT / "downloads" / "uploads" / safe_user / stamp
+        local_dir.mkdir(parents=True, exist_ok=True)
+        for f in uploaded_files:
+            (local_dir / f.name).write_bytes(f.getvalue())
             try:
-                from bitrix_selenium import download_work_report_excels
+                f.seek(0)
+            except Exception:
+                pass
 
-                target = bitrix_target_day(selected_day)
-                result = download_work_report_excels(target)
-                for msg in result.get("messages") or []:
-                    st.caption(msg)
-                files = result.get("files") or []
-                folder = result.get("dir")
-                if not files:
-                    st.error("Файлы из Битрикс не скачались.")
-                    st.stop()
-                incoming = load_excel_reports_from_dir(folder)
-                _, _ = publish_day_snapshot(incoming, window_day=selected_day, replace=True)
-                st.success("Снимок дня сохранён. Все увидят этот результат.")
-                st.rerun()
-            except Exception as exc:
-                st.error(f"Ошибка Битрикс24:\n\n`{exc}`")
-                st.stop()
-elif selected_day == current_slot and not in_window:
-    st.caption(
-        "Обновление закрыто (после 20:00 или до 16:00). "
-        "Показан сохранённый результат без повторной загрузки."
-    )
-elif selected_day != current_slot:
-    st.caption("Архивный день — данные уже сохранены, из Битрикс повторно не качаем.")
-elif not bitrix_ok and bitrix_hint and not _is_streamlit_cloud():
-    st.caption(bitrix_hint)
-elif _is_streamlit_cloud() and in_window:
-    st.caption(
-        "На сайте идёт окно 16:00–20:00. Обновление выполняет сервер/ПК администратора "
-        "(скрипт `fetch_scheduler.py`)."
-    )
+        incoming = load_uploaded_employees(uploaded_files, uploaded_by=uploader_name.strip())
+        if incoming is None or incoming.empty:
+            st.error("Не удалось прочитать % из A1.")
+            st.stop()
+
+        try:
+            with st.spinner("Сохраняю в общую таблицу…"):
+                df_pub, meta = publish_day_snapshot(
+                    incoming,
+                    window_day=current_slot,
+                    replace=False,
+                    allow_outside_window=True,
+                )
+            if _is_streamlit_cloud():
+                st.success(
+                    f"Готово: все увидят эти данные. В таблице сейчас "
+                    f"{meta.get('count', len(df_pub))} записей."
+                )
+            else:
+                st.success(
+                    f"Сохранено в `{local_dir}` · "
+                    f"в общей таблице {meta.get('count', len(df_pub))} записей."
+                )
+        except Exception as exc:
+            if _is_streamlit_cloud():
+                st.error(
+                    "Не удалось сохранить в общую таблицу. "
+                    "В Streamlit → Settings → Secrets нужен BITRIX_WEBHOOK_URL.\n\n"
+                    f"`{exc}`"
+                )
+            else:
+                st.warning(
+                    f"Файлы сохранены в `{local_dir}`, "
+                    f"но общую таблицу обновить не удалось:\n\n`{exc}`"
+                )
+            st.stop()
+        st.rerun()
+
+day_options = sorted({current_slot, *available_days}, reverse=True) or [current_slot]
+selected_day = st.selectbox(
+    "Какой день смотреть",
+    day_options,
+    format_func=lambda d: d.strftime("%d.%m.%Y") + (" · текущий" if d == current_slot else " · архив"),
+)
 
 try:
     df, shared_meta = load_day(selected_day)
 except Exception as exc:
-    st.error(f"Не удалось загрузить день {selected_day}: `{exc}`")
+    if shared_error:
+        st.info("Общих данных пока нет. Загрузите Excel выше.")
+        st.stop()
+    st.error(f"Не удалось загрузить день: `{exc}`")
     st.stop()
 
 if df is None or df.empty or "KPI" not in getattr(df, "columns", []):
-    if selected_day == current_slot and in_window:
-        st.info("За этот слот данных ещё нет — дождитесь обновления из Битрикс (16:00–20:00).")
-    else:
-        st.info("За выбранный день сохранённого результата нет.")
+    st.info("Пока никто не загрузил отчёты — добавьте Excel выше.")
     st.stop()
 
-bits = [
-    f"Слот: {selected_day.strftime('%d.%m.%Y')}",
-    f"Битрикс-день: {shared_meta.get('bitrix_day')}",
-    f"Записей: {shared_meta.get('count', len(df))}",
-]
+bits = [f"День: {selected_day.strftime('%d.%m.%Y')}", f"Записей: {len(df)}"]
 if shared_meta.get("updated_at"):
     bits.append(f"Обновлено: {shared_meta['updated_at']}")
-if shared_meta.get("frozen"):
-    bits.append("зафиксировано")
 st.caption(" · ".join(bits))
 
 # =========================
@@ -552,7 +561,7 @@ if search:
 
 display_cols = [
     c
-    for c in ["Сотрудник", "KPI", "Категория", "Файл", "Обновлено"]
+    for c in ["Сотрудник", "KPI", "Категория", "Файл", "Кто загрузил", "Обновлено"]
     if c in filtered_df.columns
 ]
 table = filtered_df[display_cols]

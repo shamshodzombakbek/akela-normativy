@@ -123,7 +123,9 @@ def _load_raw_store() -> tuple[dict, dict[str, Any]]:
 def _employees_to_df(employees: list) -> pd.DataFrame:
     df = pd.DataFrame(employees or [])
     if df.empty:
-        return pd.DataFrame(columns=["Сотрудник", "KPI", "Категория", "Файл", "Обновлено"])
+        return pd.DataFrame(
+            columns=["Сотрудник", "KPI", "Категория", "Файл", "Обновлено", "Кто загрузил"]
+        )
     if "KPI" in df.columns:
         df["KPI"] = pd.to_numeric(df["KPI"], errors="coerce").fillna(0.0)
         df["Категория"] = df["KPI"].map(kpi_category)
@@ -131,7 +133,11 @@ def _employees_to_df(employees: list) -> pd.DataFrame:
 
 
 def _df_to_employees(df: pd.DataFrame) -> list[dict]:
-    cols = [c for c in ["Сотрудник", "KPI", "Категория", "Файл", "Обновлено"] if c in df.columns]
+    cols = [
+        c
+        for c in ["Сотрудник", "KPI", "Категория", "Файл", "Обновлено", "Кто загрузил"]
+        if c in df.columns
+    ]
     records = df[cols].to_dict(orient="records")
     for row in records:
         if "KPI" in row:
@@ -236,14 +242,20 @@ def publish_day_snapshot(
     incoming_df: pd.DataFrame,
     window_day: date | None = None,
     replace: bool = True,
+    allow_outside_window: bool = False,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """
     Сохранить снимок за слот.
     replace=True — полностью заменить сотрудников слота (типично для Битрикс-fetch).
+    allow_outside_window=True — ручная загрузка Excel вне окна 16–20.
     """
     store, disk_meta = _load_raw_store()
     day = window_day or active_window_day()
-    if not is_fetch_window() and day == active_window_day():
+    if (
+        not allow_outside_window
+        and not is_fetch_window()
+        and day == active_window_day()
+    ):
         raise RuntimeError("Сейчас вне окна 16:00–20:00 (Ташкент). Обновление из Битрикс закрыто.")
 
     key = day.isoformat()

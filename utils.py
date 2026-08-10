@@ -67,7 +67,7 @@ def employee_name_from_normativ_file(name: str) -> str:
     return stem or Path(name).stem
 
 
-def load_uploaded_employees(uploaded_files):
+def load_uploaded_employees(uploaded_files, uploaded_by: str = ""):
     employees = []
 
     for file in uploaded_files:
@@ -84,12 +84,15 @@ def load_uploaded_employees(uploaded_files):
             else:
                 name = os.path.splitext(fname)[0]
 
-            employees.append({
+            row = {
                 "Сотрудник": name,
                 "KPI": percent,
                 "Категория": kpi_category(percent),
                 "Файл": fname,
-            })
+            }
+            if uploaded_by:
+                row["Кто загрузил"] = uploaded_by
+            employees.append(row)
         except Exception as e:
             print(getattr(file, "name", file), e)
 
