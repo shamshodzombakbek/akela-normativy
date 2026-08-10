@@ -354,10 +354,40 @@ def load_employees_roster(path: str | Path | None = None) -> pd.DataFrame:
 
 def _match_score(upload_name: str, fio: str, role: str) -> float:
     """Насколько имя из Excel (файл Normativ_…) похоже на человека из списка."""
+    # Латиница (Normativ) ↔ кириллица (штатка)
+    role_aliases = {
+        "ofis menejeri": "офис менеджер",
+        "ofis menejer": "офис менеджер",
+        "office manager": "офис менеджер",
+        "haydovchi": "водитель",
+        "xavfsizlik xodimi": "сотрудник охраны",
+        "elektronshik muhandis": "инженер электронщик",
+        "elektr muhandisi": "инженер электрик",
+        "mexanik muhandis": "инженер механик",
+        "ombor mudiri": "заведующий складом",
+        "sistemnyy administrator": "системный администратор",
+        "system administrator": "системный администратор",
+        "xarid menejer": "менеджер по закупу",
+        "logistika menejeri": "менеджер по логистике",
+        "hr menejer": "hr менеджер",
+        "moliya direktori": "директор по финансам",
+        "boshqaruvchi direktor": "управляющий директор",
+    }
+
+    def role_fold(value: str | None) -> str:
+        key_lat = _to_latin_fold(value)
+        key = _normalize_person_text(value)
+        for src, dst in role_aliases.items():
+            if key_lat == src or key == src or src in key_lat:
+                return _normalize_person_text(dst)
+        key = re.sub(r"\b(ceo|ceoo|cmo|chro|cpro|agm)\b", " ", key)
+        return re.sub(r"\s+", " ", key).strip()
+
     u = _normalize_person_text(upload_name)
     f = _normalize_person_text(fio)
     r = _normalize_person_text(role)
     u_lat, f_lat, r_lat = _to_latin_fold(upload_name), _to_latin_fold(fio), _to_latin_fold(role)
+    u_role, r_role = role_fold(upload_name), role_fold(role)
     if not u:
         return 0.0
 
@@ -366,13 +396,17 @@ def _match_score(upload_name: str, fio: str, role: str) -> float:
         return 100.0
     if r and (u == r or u_lat == r_lat):
         return 92.0
+    if u_role and r_role and u_role == r_role:
+        return 90.0
 
     ut = _token_variants(upload_name)
     ft = _token_variants(fio)
-    rt = _token_variants(role)
+    rt = _token_variants(role) | _tokens(r_role) | _tokens(u_role)
 
     if ft and ut == ft:
         score = max(score, 98.0)
+    if rt and ut and ut <= rt:
+        score = max(score, 88.0)
     if rt and ut == rt:
         score = max(score, 90.0)
 
@@ -392,10 +426,17 @@ def _match_score(upload_name: str, fio: str, role: str) -> float:
         overlap_r = len(ut & rt) / max(len(rt), 1)
         if r and (u in r or r in u or u_lat in r_lat or r_lat in u_lat):
             score = max(score, 85.0)
+        if u_role and r_role and (u_role in r_role or r_role in u_role):
+            score = max(score, 82.0)
         if overlap_r >= 0.5:
             score = max(score, 65.0 + 30.0 * overlap_r)
         elif overlap_r > 0:
-            score = max(score, 40.0 + 30.0 * overlap_r)
+            score = max(score, 45.0 + 35.0 * overlap_r)
+
+    u_core = {t for t in ut if len(t) >= 4}
+    r_core = {t for t in _tokens(r_role) if len(t) >= 4}
+    if u_core and r_core and (u_core & r_core):
+        score = max(score, 70.0 + 20.0 * (len(u_core & r_core) / max(len(r_core), 1)))
 
     return score
 
@@ -403,7 +444,7 @@ def _match_score(upload_name: str, fio: str, role: str) -> float:
 def build_roster_attendance(
     roster: pd.DataFrame,
     submitted: pd.DataFrame | None,
-    min_score: float = 48.0,
+    min_score: float = 42.0,
 ) -> pd.DataFrame:
     """
     Полный список: кто сдал норматив (есть Excel), кто нет.
@@ -494,6 +535,8 @@ def build_roster_attendance(
 def build_filled_staffing_with_reports(
     staffing: pd.DataFrame,
     attendance: pd.DataFrame | None,
+    submitted: pd.DataFrame | None = None,
+    min_score: float = 42.0,
 ) -> pd.DataFrame:
     """Занятые места штатки + статус сдачи отчёта (вакансии исключены)."""
     if staffing is None or staffing.empty:
@@ -512,52 +555,100 @@ def build_filled_staffing_with_reports(
         )
 
     filled = staffing[staffing["Статус_места"] == "Занято"].copy().reset_index(drop=True)
-    status_by_key: dict[str, dict] = {}
-    if attendance is not None and not attendance.empty:
-        for _, row in attendance.iterrows():
-            key = _normalize_person_text(str(row.get("ФИО") or ""))
-            lat = _to_latin_fold(str(row.get("ФИО") or ""))
-            payload = {
-                "Статус": row.get("Статус") or "❌ Не сдал",
-                "KPI": float(row.get("KPI") or 0),
-                "Категория": row.get("Категория") or kpi_category(None),
-                "Файл": row.get("Файл") or "",
-            }
-            if key:
-                status_by_key[key] = payload
-            if lat:
-                status_by_key[lat] = payload
-
-    statuses, kpis, cats, files = [], [], [], []
-    for _, row in filled.iterrows():
-        fio = str(row.get("ФИО") or "")
-        hit = status_by_key.get(_normalize_person_text(fio)) or status_by_key.get(
-            _to_latin_fold(fio)
-        )
-        if hit:
-            statuses.append(hit["Статус"])
-            kpis.append(hit["KPI"])
-            cats.append(hit["Категория"])
-            files.append(hit["Файл"])
-        else:
-            statuses.append("❌ Не сдал")
-            kpis.append(0.0)
-            cats.append(kpi_category(None))
-            files.append("")
-
-    filled["Статус"] = statuses
-    filled["KPI"] = kpis
-    filled["Категория"] = cats
-    filled["Файл"] = files
     if "Пометка" not in filled.columns:
         filled["Пометка"] = ""
+    filled["Статус"] = "❌ Не сдал"
+    filled["KPI"] = 0.0
+    filled["Категория"] = kpi_category(None)
+    filled["Файл"] = ""
+    filled["_matched"] = False
 
+    # 1) Прямое сопоставление Excel → место в штатке
+    uploads = []
+    if submitted is not None and not submitted.empty and "Сотрудник" in submitted.columns:
+        for _, row in submitted.iterrows():
+            uploads.append(
+                {
+                    "name": str(row.get("Сотрудник") or ""),
+                    "kpi": float(row.get("KPI") or 0),
+                    "file": str(row.get("Файл") or ""),
+                    "used": False,
+                }
+            )
+
+    pairs: list[tuple[float, int, int]] = []
+    for ui, up in enumerate(uploads):
+        for ri, row in filled.iterrows():
+            sc = _match_score(up["name"], str(row.get("ФИО") or ""), str(row.get("Должность") or ""))
+            if sc >= min_score:
+                pairs.append((sc, ui, int(ri)))
+    pairs.sort(key=lambda x: x[0], reverse=True)
+
+    for sc, ui, ri in pairs:
+        if uploads[ui]["used"] or bool(filled.at[ri, "_matched"]):
+            continue
+        up = uploads[ui]
+        uploads[ui]["used"] = True
+        filled.at[ri, "_matched"] = True
+        kpi = up["kpi"]
+        filled.at[ri, "Статус"] = "✅ Сдал" if kpi > 0 else "⚫ 0%"
+        filled.at[ri, "KPI"] = kpi
+        filled.at[ri, "Категория"] = kpi_category(kpi if kpi > 0 else None)
+        filled.at[ri, "Файл"] = up["file"]
+
+        # тот же человек на других местах — тоже отмечаем
+        fio_key = _normalize_person_text(str(filled.at[ri, "ФИО"] or ""))
+        if fio_key:
+            for rj, other in filled.iterrows():
+                if bool(filled.at[rj, "_matched"]):
+                    continue
+                if _normalize_person_text(str(other.get("ФИО") or "")) == fio_key:
+                    filled.at[rj, "_matched"] = True
+                    filled.at[rj, "Статус"] = filled.at[ri, "Статус"]
+                    filled.at[rj, "KPI"] = filled.at[ri, "KPI"]
+                    filled.at[rj, "Категория"] = filled.at[ri, "Категория"]
+                    filled.at[rj, "Файл"] = filled.at[ri, "Файл"]
+
+    # 2) Дополнение из attendance (уникальные ФИО), если прямого матча не было
+    if attendance is not None and not attendance.empty:
+        for _, row in attendance.iterrows():
+            if str(row.get("Статус") or "") == "❌ Не сдал":
+                continue
+            fio_key = _normalize_person_text(str(row.get("ФИО") or ""))
+            lat = _to_latin_fold(str(row.get("ФИО") or ""))
+            payload_status = row.get("Статус") or "✅ Сдал"
+            payload_kpi = float(row.get("KPI") or 0)
+            payload_cat = row.get("Категория") or kpi_category(payload_kpi if payload_kpi > 0 else None)
+            payload_file = row.get("Файл") or ""
+            for ri, seat in filled.iterrows():
+                if bool(filled.at[ri, "_matched"]):
+                    continue
+                seat_key = _normalize_person_text(str(seat.get("ФИО") or ""))
+                seat_lat = _to_latin_fold(str(seat.get("ФИО") or ""))
+                if (seat_key and seat_key == fio_key) or (lat and seat_lat == lat):
+                    filled.at[ri, "_matched"] = True
+                    filled.at[ri, "Статус"] = payload_status
+                    filled.at[ri, "KPI"] = payload_kpi
+                    filled.at[ri, "Категория"] = payload_cat
+                    filled.at[ri, "Файл"] = payload_file
+
+    filled = filled.drop(columns=["_matched"])
     order = {"✅ Сдал": 0, "⚫ 0%": 1, "❌ Не сдал": 2}
     filled["_s"] = filled["Статус"].map(order).fillna(9)
     filled = filled.sort_values(["_s", "№"]).drop(columns=["_s"]).reset_index(drop=True)
 
-    submitted_n = int((filled["Статус"] != "❌ Не сдал").sum())
+    # Счётчики по уникальным людям (не по числу должностей одного человека)
+    people = filled.copy()
+    people["_key"] = people["ФИО"].map(_normalize_person_text)
+    people = people[people["_key"] != ""]
+    unique = people.drop_duplicates("_key", keep="first")
+    submitted_people = int((unique["Статус"] != "❌ Не сдал").sum())
+    total_people = int(len(unique))
+
     filled.attrs["total"] = len(filled)
-    filled.attrs["submitted"] = submitted_n
-    filled.attrs["missing"] = len(filled) - submitted_n
+    filled.attrs["submitted"] = submitted_people
+    filled.attrs["missing"] = total_people - submitted_people
+    filled.attrs["people_total"] = total_people
+    unmatched = [u["name"] for u in uploads if not u["used"] and u["name"]]
+    filled.attrs["unmatched_uploads"] = unmatched
     return filled

@@ -386,7 +386,9 @@ if df is None:
 staffing = load_staffing()
 roster = load_employees_roster()
 attendance = build_roster_attendance(roster, df if not df.empty else None)
-filled_staff = build_filled_staffing_with_reports(staffing, attendance)
+filled_staff = build_filled_staffing_with_reports(
+    staffing, attendance, submitted=df if not df.empty else None
+)
 vacancies = (
     staffing[staffing["Статус_места"] == "Вакансия"].copy()
     if not staffing.empty
@@ -415,7 +417,11 @@ if not filled_staff.empty or not vacancies.empty or not roster.empty:
     seats_yuk = int(staffing.attrs.get("seats_yuklatilgan") or 0)
     sub_n = int(filled_staff.attrs.get("submitted") or 0) if not filled_staff.empty else 0
     miss_n = int(filled_staff.attrs.get("missing") or 0) if not filled_staff.empty else 0
-    people_rate = (100.0 * sub_n / seats_filled) if seats_filled else 0.0
+    people_rate = (
+        (100.0 * sub_n / int(filled_staff.attrs.get("people_total") or sub_n or 1))
+        if (not filled_staff.empty and int(filled_staff.attrs.get("people_total") or 0))
+        else 0.0
+    )
 
     st.markdown('<p class="akela-section-label">Штат</p>', unsafe_allow_html=True)
     s1, s2, s3, s4 = st.columns(4)
@@ -423,8 +429,10 @@ if not filled_staff.empty or not vacancies.empty or not roster.empty:
     s2.metric("В списке (занято)", seats_filled)
     s3.metric("Сдали отчёт", sub_n)
     s4.metric("Не сдали", miss_n)
+    people_total = int(filled_staff.attrs.get("people_total") or 0) if not filled_staff.empty else 0
     st.caption(
-        f"Сдали {people_rate:.0f}% от занятых мест"
+        f"Сдали {people_rate:.0f}% от сотрудников"
+        + (f" ({people_total} чел.)" if people_total else "")
         + (f" · вакансий отдельно: {seats_vacant}" if seats_vacant else "")
         + (f" · юклатилган: {seats_yuk}" if seats_yuk else "")
     )
@@ -461,7 +469,9 @@ if not filled_staff.empty or not vacancies.empty or not roster.empty:
     ]
     st.dataframe(staff_view[show_staff], use_container_width=True, hide_index=True)
 
-    unmatched = attendance.attrs.get("unmatched_uploads") or []
+    unmatched = list(filled_staff.attrs.get("unmatched_uploads") or []) or list(
+        attendance.attrs.get("unmatched_uploads") or []
+    )
     if unmatched:
         st.caption(
             "Отчёты вне списка (не сопоставлены с ФИО/должностью): "
