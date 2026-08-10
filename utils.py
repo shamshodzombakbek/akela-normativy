@@ -566,6 +566,15 @@ def _sales_line_delta(upload_name: str | None, role: str | None) -> float:
         else:
             delta -= 45.0
 
+    u_buy, r_buy = has("zakup", "xarid", "закуп", " заку")
+    u_sale, r_sale = has("sotuv", "sales", "продаж", "продажа")
+    if u_sale and r_buy and not r_sale:
+        delta -= 50.0
+    if u_buy and r_sale and not r_buy:
+        delta -= 50.0
+    if (u_sale and r_sale) or (u_buy and r_buy):
+        delta += 12.0
+
     return delta
 
 
