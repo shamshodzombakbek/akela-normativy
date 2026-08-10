@@ -7,10 +7,11 @@ from utils import load_uploaded_employees
 
 ROOT = Path(__file__).resolve().parent
 LOGO_PATH = ROOT / "assets" / "akela-logo.png"
+FAVICON_PATH = ROOT / "assets" / "akela-favicon.png"
 
 st.set_page_config(
     page_title="Akela · Отчёты по нормативам",
-    page_icon="📊",
+    page_icon=str(FAVICON_PATH if FAVICON_PATH.exists() else LOGO_PATH),
     layout="wide",
     initial_sidebar_state="collapsed",
 )
