@@ -307,9 +307,9 @@ except Exception as exc:
 
 if shared_error:
     st.warning(
-        "Google Drive пока недоступен. Нужен обычный файл `shared_kpi.json` "
-        "(Загрузка файла, не Google Документ), папка с доступом "
-        "Редактор для `akela-streamlit@...`, и корректные Secrets.\n\n"
+        "Google Drive пока недоступен. Проверьте: папка расшарена "
+        "Редактором на `akela-streamlit@...`, Secrets (`GOOGLE_DRIVE_FOLDER_ID` "
+        "и ключ), файл `shared_kpi.json` в этой папке.\n\n"
         f"`{shared_error}`"
     )
 
