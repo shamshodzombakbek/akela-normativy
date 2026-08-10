@@ -289,10 +289,13 @@ st.markdown('<p class="akela-section-label">Загрузка Excel</p>', unsafe_
 from schedule import active_window_day, now_tashkent
 from shared_store import load_day, publish_day_snapshot
 
-# Битрикс24-режим сохранён в git (commit 852064e) — временно только Excel.
+# Битрикс24-режим сохранён в git — временно только Excel + Google Drive.
 
 now = now_tashkent()
 current_slot = active_window_day(now)
+
+# Сначала рисуем заголовок загрузки, Google проверяем мягко
+st.caption("Загрузите Excel — диаграммы увидит любой по этой ссылке.")
 
 shared_error = None
 available_days: list = []
@@ -304,13 +307,10 @@ except Exception as exc:
 
 if shared_error:
     st.warning(
-        "Общая таблица недоступна. Нужен доступ к Google Drive: "
-        "Streamlit Secrets → `[google_service_account]` + расшарьте папку Drive "
-        "на email сервисного аккаунта (права «Редактор»).\n\n"
+        "Google Drive пока недоступен. Проверьте Secrets и доступ папки "
+        "для `akela-streamlit@...` (Редактор).\n\n"
         f"`{shared_error}`"
     )
-
-st.caption("Загрузите Excel — диаграммы увидит любой, кто откроет эту ссылку (Google Drive).")
 
 uploaded_files = st.file_uploader(
     "Excel-отчёты",
