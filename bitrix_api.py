@@ -17,10 +17,17 @@ _ENV_PATH = os.path.join(os.path.dirname(__file__), ".env")
 
 def _webhook_url() -> str:
     load_dotenv(_ENV_PATH, override=True)
+    try:
+        import streamlit as st
+
+        if hasattr(st, "secrets") and st.secrets.get("BITRIX_WEBHOOK_URL"):
+            os.environ["BITRIX_WEBHOOK_URL"] = str(st.secrets["BITRIX_WEBHOOK_URL"])
+    except Exception:
+        pass
     url = os.getenv("BITRIX_WEBHOOK_URL", "").strip()
     if not url:
         raise ValueError(
-            "Не задан BITRIX_WEBHOOK_URL. Добавьте его в файл .env."
+            "Не задан BITRIX_WEBHOOK_URL. Добавьте его в .env или Streamlit Secrets."
         )
     return url.rstrip("/") + "/"
 

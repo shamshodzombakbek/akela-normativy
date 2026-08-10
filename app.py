@@ -1,13 +1,46 @@
+from datetime import date
 from pathlib import Path
+import os
 
+import pandas as pd
 import streamlit as st
 import plotly.express as px
 
-from utils import load_uploaded_employees
+from utils import load_excel_reports_from_dir
 
 ROOT = Path(__file__).resolve().parent
 LOGO_PATH = ROOT / "assets" / "akela-logo.png"
 FAVICON_PATH = ROOT / "assets" / "akela-favicon.png"
+
+
+def _is_streamlit_cloud() -> bool:
+    return bool(
+        os.getenv("STREAMLIT_RUNTIME_ENVIRONMENT") == "cloud"
+        or os.getenv("IS_STREAMLIT_CLOUD")
+        or Path("/mount/src").exists()
+    )
+
+
+def _bitrix_browser_ready() -> tuple[bool, str]:
+    """Локально: Selenium + логин в .env. На Cloud — недоступно."""
+    if _is_streamlit_cloud():
+        return False, "На streamlit.app автозагрузка из Битрикс недоступна — загрузите Excel вручную."
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv(ROOT / ".env", override=True)
+    except Exception:
+        pass
+    login = os.getenv("BITRIX_LOGIN", "").strip()
+    password = os.getenv("BITRIX_PASSWORD", "").strip()
+    if not login or not password:
+        return False, "В .env нужны BITRIX_LOGIN и BITRIX_PASSWORD."
+    try:
+        import selenium  # noqa: F401
+        import webdriver_manager  # noqa: F401
+    except ImportError:
+        return False, "Установите локально: pip install -r requirements-local.txt"
+    return True, ""
 
 st.set_page_config(
     page_title="Akela · Отчёты по нормативам",
@@ -251,22 +284,118 @@ PLOTLY_LAYOUT = dict(
     colorway=["#3E4197", "#1F7A4C", "#B7791F", "#C53030", "#7A8B9C", "#1A2332"],
 )
 
-st.markdown('<p class="akela-section-label">Источник</p>', unsafe_allow_html=True)
-uploaded_files = st.file_uploader(
-    "Excel-отчёты",
-    type=["xlsx", "xls"],
-    accept_multiple_files=True,
-    label_visibility="collapsed",
+st.markdown('<p class="akela-section-label">Отчёты по нормативам</p>', unsafe_allow_html=True)
+
+from schedule import (
+    active_window_day,
+    bitrix_target_day,
+    is_fetch_window,
+    now_tashkent,
+    status_label,
+)
+from shared_store import load_day, publish_day_snapshot
+
+now = now_tashkent()
+current_slot = active_window_day(now)
+st.caption(status_label(now))
+
+shared_error = None
+available_days: list = []
+try:
+    _, boot_meta = load_day(current_slot)
+    available_days = [date.fromisoformat(x) for x in boot_meta.get("available_days") or []]
+except Exception as exc:
+    shared_error = str(exc)
+
+if shared_error:
+    st.warning(
+        "Не удалось прочитать хранилище. На Cloud добавьте секрет `BITRIX_WEBHOOK_URL`.\n\n"
+        f"`{shared_error}`"
+    )
+
+# Выбор дня: текущий слот + архив (без повторной загрузки из Битрикс)
+day_options = sorted({current_slot, *available_days}, reverse=True)
+if not day_options:
+    day_options = [current_slot]
+
+selected_day = st.selectbox(
+    "День (слот 16:00–20:00)",
+    day_options,
+    format_func=lambda d: (
+        f"{d.strftime('%d.%m.%Y')}"
+        + (" · сегодня" if d == current_slot else " · архив")
+    ),
+    index=0,
 )
 
-if uploaded_files:
-    df = load_uploaded_employees(uploaded_files)
-else:
+bitrix_ok, bitrix_hint = _bitrix_browser_ready()
+in_window = is_fetch_window(now) and selected_day == current_slot
+
+if in_window and bitrix_ok:
+    st.info(
+        f"Окно обновления открыто. Битрикс за "
+        f"**{bitrix_target_day(selected_day).strftime('%d.%m.%Y')}** "
+        f"(вчера относительно слота)."
+    )
+    if st.button("Обновить сейчас из Битрикс24", type="primary"):
+        with st.spinner("Скачиваю Normativ из Битрикс…"):
+            try:
+                from bitrix_selenium import download_work_report_excels
+
+                target = bitrix_target_day(selected_day)
+                result = download_work_report_excels(target)
+                for msg in result.get("messages") or []:
+                    st.caption(msg)
+                files = result.get("files") or []
+                folder = result.get("dir")
+                if not files:
+                    st.error("Файлы из Битрикс не скачались.")
+                    st.stop()
+                incoming = load_excel_reports_from_dir(folder)
+                _, _ = publish_day_snapshot(incoming, window_day=selected_day, replace=True)
+                st.success("Снимок дня сохранён. Все увидят этот результат.")
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Ошибка Битрикс24:\n\n`{exc}`")
+                st.stop()
+elif selected_day == current_slot and not in_window:
+    st.caption(
+        "Обновление закрыто (после 20:00 или до 16:00). "
+        "Показан сохранённый результат без повторной загрузки."
+    )
+elif selected_day != current_slot:
+    st.caption("Архивный день — данные уже сохранены, из Битрикс повторно не качаем.")
+elif not bitrix_ok and bitrix_hint and not _is_streamlit_cloud():
+    st.caption(bitrix_hint)
+elif _is_streamlit_cloud() and in_window:
+    st.caption(
+        "На сайте идёт окно 16:00–20:00. Обновление выполняет сервер/ПК администратора "
+        "(скрипт `fetch_scheduler.py`)."
+    )
+
+try:
+    df, shared_meta = load_day(selected_day)
+except Exception as exc:
+    st.error(f"Не удалось загрузить день {selected_day}: `{exc}`")
     st.stop()
 
-if df is None or df.empty:
-    st.warning("Нет данных для отображения.")
+if df is None or df.empty or "KPI" not in getattr(df, "columns", []):
+    if selected_day == current_slot and in_window:
+        st.info("За этот слот данных ещё нет — дождитесь обновления из Битрикс (16:00–20:00).")
+    else:
+        st.info("За выбранный день сохранённого результата нет.")
     st.stop()
+
+bits = [
+    f"Слот: {selected_day.strftime('%d.%m.%Y')}",
+    f"Битрикс-день: {shared_meta.get('bitrix_day')}",
+    f"Записей: {shared_meta.get('count', len(df))}",
+]
+if shared_meta.get("updated_at"):
+    bits.append(f"Обновлено: {shared_meta['updated_at']}")
+if shared_meta.get("frozen"):
+    bits.append("зафиксировано")
+st.caption(" · ".join(bits))
 
 # =========================
 # Metrics
@@ -423,7 +552,7 @@ if search:
 
 display_cols = [
     c
-    for c in ["Сотрудник", "KPI", "Категория", "Файл"]
+    for c in ["Сотрудник", "KPI", "Категория", "Файл", "Обновлено"]
     if c in filtered_df.columns
 ]
 table = filtered_df[display_cols]
