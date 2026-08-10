@@ -399,10 +399,25 @@ if df is None:
     df = pd.DataFrame()
 
 # =========================
-# Удаление ошибочных загрузок
+# Удаление ошибочных загрузок (скрыто: ?admin=ТОКЕН из Secrets)
 # =========================
-if not df.empty and "Сотрудник" in df.columns:
-    with st.expander("Удалить ошибочную запись из отчёта"):
+def _admin_delete_token() -> str:
+    try:
+        if hasattr(st, "secrets") and st.secrets.get("ADMIN_DELETE_TOKEN"):
+            return str(st.secrets["ADMIN_DELETE_TOKEN"]).strip()
+    except Exception:
+        pass
+    return os.getenv("ADMIN_DELETE_TOKEN", "").strip()
+
+
+_admin_token = _admin_delete_token()
+_admin_unlocked = bool(
+    _admin_token
+    and str(st.query_params.get("admin") or "").strip() == _admin_token
+)
+
+if _admin_unlocked and not df.empty and "Сотрудник" in df.columns:
+    with st.expander("Удалить ошибочную запись из отчёта", expanded=True):
         options = []
         for _, row in df.iterrows():
             name = str(row.get("Сотрудник") or "")
