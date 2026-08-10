@@ -5,3 +5,4 @@ __pycache__/
 .DS_Store
 .bitrix_cookies.json
 downloads/
+google_service_account.json

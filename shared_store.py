@@ -104,11 +104,30 @@ def _migrate_payload(payload: dict) -> dict:
 
 
 def _load_raw_store() -> tuple[dict, dict[str, Any]]:
+    """Читает store: сначала Google Drive, иначе Диск Битрикс."""
     _ensure_env()
+    try:
+        from google_store import is_google_configured, load_store_dict
+
+        if is_google_configured():
+            store = load_store_dict()
+            return _migrate_payload(store), {"backend": "google", "file_id": None, "folder_id": None}
+    except Exception as google_exc:
+        # если Google настроен, но упал — не молчим в meta
+        try:
+            from google_store import is_google_configured
+
+            if is_google_configured():
+                raise RuntimeError(f"Google Drive: {google_exc}") from google_exc
+        except RuntimeError:
+            raise
+        except Exception:
+            pass
+
     folder = ensure_shared_folder()
     folder_id = int(folder["ID"])
     file_meta = _find_shared_file(folder_id)
-    meta = {"folder_id": folder_id, "file_id": None}
+    meta: dict[str, Any] = {"backend": "bitrix", "folder_id": folder_id, "file_id": None}
     if not file_meta:
         return _empty_store(), meta
     meta["file_id"] = int(file_meta["ID"])
@@ -118,6 +137,51 @@ def _load_raw_store() -> tuple[dict, dict[str, Any]]:
     except Exception:
         payload = {}
     return _migrate_payload(payload if isinstance(payload, dict) else {}), meta
+
+
+def save_store(store: dict, file_id: int | None, folder_id: int | None) -> dict:
+    _ensure_env()
+    try:
+        from google_store import is_google_configured, save_store_dict
+
+        if is_google_configured():
+            saved = save_store_dict(store)
+            return {"file": saved, "store": store, "backend": "google"}
+    except Exception as google_exc:
+        try:
+            from google_store import is_google_configured
+
+            if is_google_configured():
+                raise RuntimeError(f"Google Drive: {google_exc}") from google_exc
+        except RuntimeError:
+            raise
+        except Exception:
+            pass
+
+    if folder_id is None:
+        folder = ensure_shared_folder()
+        folder_id = int(folder["ID"])
+    if file_id is None:
+        existing = _find_shared_file(folder_id)
+        file_id = int(existing["ID"]) if existing else None
+
+    content = json.dumps(store, ensure_ascii=False, indent=2).encode("utf-8")
+    encoded = base64.b64encode(content).decode("ascii")
+    if file_id:
+        result = bitrix_call(
+            "disk.file.uploadversion",
+            {"id": file_id, "fileContent": [FILE_NAME, encoded]},
+        )
+        return {"file": result, "store": store, "backend": "bitrix"}
+    result = bitrix_call_full(
+        "disk.folder.uploadfile",
+        {
+            "id": folder_id,
+            "data": {"NAME": FILE_NAME},
+            "fileContent": [FILE_NAME, encoded],
+        },
+    )
+    return {"file": result.get("result"), "store": store, "backend": "bitrix"}
 
 
 def _employees_to_df(employees: list) -> pd.DataFrame:
@@ -179,34 +243,6 @@ def load_day(window_day: date | None = None) -> tuple[pd.DataFrame, dict[str, An
         "available_days": [d.isoformat() for d in list_available_days(store)],
         "can_fetch": is_fetch_window() and day == active_window_day(),
     }
-
-
-def save_store(store: dict, file_id: int | None, folder_id: int | None) -> dict:
-    _ensure_env()
-    if folder_id is None:
-        folder = ensure_shared_folder()
-        folder_id = int(folder["ID"])
-    if file_id is None:
-        existing = _find_shared_file(folder_id)
-        file_id = int(existing["ID"]) if existing else None
-
-    content = json.dumps(store, ensure_ascii=False, indent=2).encode("utf-8")
-    encoded = base64.b64encode(content).decode("ascii")
-    if file_id:
-        result = bitrix_call(
-            "disk.file.uploadversion",
-            {"id": file_id, "fileContent": [FILE_NAME, encoded]},
-        )
-        return {"file": result, "store": store}
-    result = bitrix_call_full(
-        "disk.folder.uploadfile",
-        {
-            "id": folder_id,
-            "data": {"NAME": FILE_NAME},
-            "fileContent": [FILE_NAME, encoded],
-        },
-    )
-    return {"file": result.get("result"), "store": store}
 
 
 def freeze_day_if_needed(store: dict, window_day: date) -> bool:

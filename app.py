@@ -304,11 +304,13 @@ except Exception as exc:
 
 if shared_error:
     st.warning(
-        "Общая таблица недоступна без `BITRIX_WEBHOOK_URL` в Streamlit Secrets.\n\n"
+        "Общая таблица недоступна. Нужен доступ к Google Drive: "
+        "Streamlit Secrets → `[google_service_account]` + расшарьте папку Drive "
+        "на email сервисного аккаунта (права «Редактор»).\n\n"
         f"`{shared_error}`"
     )
 
-st.caption("Загрузите Excel — диаграммы увидит любой, кто откроет эту ссылку.")
+st.caption("Загрузите Excel — диаграммы увидит любой, кто откроет эту ссылку (Google Drive).")
 
 uploaded_files = st.file_uploader(
     "Excel-отчёты",
@@ -348,8 +350,8 @@ if uploaded_files and st.button("Показать всем", type="primary"):
         st.rerun()
     except Exception as exc:
         st.error(
-            "Не удалось сохранить общую таблицу. "
-            "В Streamlit → Settings → Secrets нужен BITRIX_WEBHOOK_URL.\n\n"
+            "Не удалось сохранить в Google Drive. "
+            "Проверьте Secrets и что папка расшарена на сервисный аккаунт.\n\n"
             f"`{exc}`"
         )
         st.stop()
