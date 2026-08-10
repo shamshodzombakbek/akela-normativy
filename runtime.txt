@@ -1,0 +1,2 @@
+# Python version for Streamlit Community Cloud
+3.11
