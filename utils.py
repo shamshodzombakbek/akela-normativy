@@ -7,6 +7,48 @@ from pathlib import Path
 import pandas as pd
 
 ROSTER_PATH = Path(__file__).resolve().parent / "data" / "employees_roster.csv"
+STAFFING_PATH = Path(__file__).resolve().parent / "data" / "staffing.csv"
+
+# Простая транслитерация для сопоставления ФИО (кириллица ↔ латиница)
+_CYR_LAT = {
+    "а": "a",
+    "б": "b",
+    "в": "v",
+    "г": "g",
+    "д": "d",
+    "е": "e",
+    "ё": "e",
+    "ж": "zh",
+    "з": "z",
+    "и": "i",
+    "й": "y",
+    "к": "k",
+    "л": "l",
+    "м": "m",
+    "н": "n",
+    "о": "o",
+    "п": "p",
+    "р": "r",
+    "с": "s",
+    "т": "t",
+    "у": "u",
+    "ф": "f",
+    "х": "h",
+    "ц": "ts",
+    "ч": "ch",
+    "ш": "sh",
+    "щ": "sh",
+    "ъ": "",
+    "ы": "y",
+    "ь": "",
+    "э": "e",
+    "ю": "yu",
+    "я": "ya",
+    "қ": "q",
+    "ғ": "g",
+    "ҳ": "h",
+    "ў": "o",
+}
 
 
 def kpi_category(percent: float | None) -> str:
@@ -149,6 +191,10 @@ def _normalize_person_text(value: str | None) -> str:
     text = str(value or "").casefold()
     text = (
         text.replace("ё", "е")
+        .replace("ў", "у")
+        .replace("ғ", "г")
+        .replace("қ", "к")
+        .replace("ҳ", "х")
         .replace("ʻ", "'")
         .replace("ʼ", "'")
         .replace("`", "'")
@@ -162,39 +208,108 @@ def _normalize_person_text(value: str | None) -> str:
     return text
 
 
+def _to_latin_fold(value: str | None) -> str:
+    text = _normalize_person_text(value)
+    return "".join(_CYR_LAT.get(ch, ch) for ch in text)
+
+
 def _tokens(value: str | None) -> set[str]:
     return {t for t in _normalize_person_text(value).split() if len(t) > 1}
 
 
-def load_employees_roster(path: str | Path | None = None) -> pd.DataFrame:
-    """Полный список сотрудников: ФИО + Должность."""
-    source = Path(path) if path else ROSTER_PATH
+def _token_variants(value: str | None) -> set[str]:
+    raw = _tokens(value)
+    lat = {t for t in _to_latin_fold(value).split() if len(t) > 1}
+    return raw | lat
+
+
+def load_staffing(path: str | Path | None = None) -> pd.DataFrame:
+    """Штатная расстановка: места (занято / вакансия)."""
+    source = Path(path) if path else STAFFING_PATH
     if not source.is_file():
-        return pd.DataFrame(columns=["ФИО", "Должность"])
-
-    if source.suffix.lower() in {".xlsx", ".xls"}:
-        raw = pd.read_excel(source)
-    else:
-        raw = pd.read_csv(source)
-
+        return pd.DataFrame(
+            columns=["№", "Код", "Должность", "Штатных_единиц", "ФИО", "Статус_места"]
+        )
+    raw = pd.read_csv(source) if source.suffix.lower() == ".csv" else pd.read_excel(source)
+    if raw.empty:
+        return raw
+    # нормализуем имена колонок
+    rename = {}
     cols = {str(c).strip().casefold(): c for c in raw.columns}
-    fio_col = cols.get("фио") or cols.get("сотрудник") or cols.get("name") or list(raw.columns)[0]
-    role_col = (
-        cols.get("должность")
-        or cols.get("position")
-        or cols.get("lavozim")
-        or (list(raw.columns)[1] if len(raw.columns) > 1 else None)
+    for want, aliases in {
+        "№": ("№", "no", "n", "num"),
+        "Код": ("код", "code"),
+        "Должность": ("должность", "position", "lavozim"),
+        "Штатных_единиц": ("штатных_единиц", "units", "кол-во"),
+        "ФИО": ("фио", "сотрудник", "name"),
+        "Статус_места": ("статус_места", "status", "seat_status"),
+    }.items():
+        for a in aliases:
+            if a in cols:
+                rename[cols[a]] = want
+                break
+    out = raw.rename(columns=rename)
+    for col in ["№", "Код", "Должность", "Штатных_единиц", "ФИО", "Статус_места"]:
+        if col not in out.columns:
+            out[col] = "" if col != "Штатных_единиц" else 1
+    out["ФИО"] = out["ФИО"].fillna("").astype(str).str.strip()
+    out["Должность"] = out["Должность"].fillna("").astype(str).str.strip()
+    status = out["Статус_места"].fillna("").astype(str)
+    vacant_mask = status.str.contains("вакан", case=False, na=False) | (
+        out["ФИО"].eq("") | out["ФИО"].str.casefold().isin({"nan", "none", "вакант"})
     )
+    out.loc[vacant_mask, "Статус_места"] = "Вакансия"
+    out.loc[~vacant_mask, "Статус_места"] = "Занято"
+    out.attrs["seats_total"] = int(len(out))
+    out.attrs["seats_filled"] = int((out["Статус_места"] == "Занято").sum())
+    out.attrs["seats_vacant"] = int((out["Статус_места"] == "Вакансия").sum())
+    return out
 
+
+def load_employees_roster(path: str | Path | None = None) -> pd.DataFrame:
+    """Уникальные сотрудники (занятые места): ФИО + Должность."""
+    source = Path(path) if path else ROSTER_PATH
+    if source.is_file():
+        if source.suffix.lower() in {".xlsx", ".xls"}:
+            raw = pd.read_excel(source)
+        else:
+            raw = pd.read_csv(source)
+
+        cols = {str(c).strip().casefold(): c for c in raw.columns}
+        fio_col = cols.get("фио") or cols.get("сотрудник") or cols.get("name") or list(raw.columns)[0]
+        role_col = (
+            cols.get("должность")
+            or cols.get("position")
+            or cols.get("lavozim")
+            or (list(raw.columns)[1] if len(raw.columns) > 1 else None)
+        )
+
+        rows = []
+        for _, row in raw.iterrows():
+            fio = str(row.get(fio_col) or "").strip()
+            if not fio or fio.casefold() in {"фио", "nan", "none", "вакант"}:
+                continue
+            role = str(row.get(role_col) or "").strip() if role_col is not None else ""
+            if role.casefold() in {"должность", "nan", "none"}:
+                role = ""
+            rows.append({"ФИО": fio, "Должность": role})
+        if rows:
+            return pd.DataFrame(rows)
+
+    # fallback: уникальные ФИО из staffing.csv
+    staff = load_staffing()
+    if staff.empty:
+        return pd.DataFrame(columns=["ФИО", "Должность"])
+    filled = staff[staff["Статус_места"] == "Занято"].copy()
     rows = []
-    for _, row in raw.iterrows():
-        fio = str(row.get(fio_col) or "").strip()
-        if not fio or fio.casefold() in {"фио", "nan", "none"}:
+    seen: set[str] = set()
+    for _, row in filled.iterrows():
+        fio = str(row.get("ФИО") or "").strip()
+        key = _normalize_person_text(fio)
+        if not fio or key in seen:
             continue
-        role = str(row.get(role_col) or "").strip() if role_col is not None else ""
-        if role.casefold() in {"должность", "nan", "none"}:
-            role = ""
-        rows.append({"ФИО": fio, "Должность": role})
+        seen.add(key)
+        rows.append({"ФИО": fio, "Должность": str(row.get("Должность") or "").strip()})
     return pd.DataFrame(rows)
 
 
@@ -203,25 +318,26 @@ def _match_score(upload_name: str, fio: str, role: str) -> float:
     u = _normalize_person_text(upload_name)
     f = _normalize_person_text(fio)
     r = _normalize_person_text(role)
+    u_lat, f_lat, r_lat = _to_latin_fold(upload_name), _to_latin_fold(fio), _to_latin_fold(role)
     if not u:
         return 0.0
 
-    if u == f:
+    score = 0.0
+    if u == f or u_lat == f_lat:
         return 100.0
-    if r and u == r:
+    if r and (u == r or u_lat == r_lat):
         return 92.0
 
-    ut, ft, rt = _tokens(upload_name), _tokens(fio), _tokens(role)
-    score = 0.0
+    ut = _token_variants(upload_name)
+    ft = _token_variants(fio)
+    rt = _token_variants(role)
 
     if ft and ut == ft:
         score = max(score, 98.0)
     if rt and ut == rt:
         score = max(score, 90.0)
 
-    # Фамилия / первое слово ФИО
-    if ft and next(iter(sorted(ft, key=len, reverse=True)[:1]) or [""]) in ut:
-        # берём самое «длинное» слово ФИО (часто фамилия латиницей)
+    if ft:
         longest = max(ft, key=len)
         if longest in ut and len(longest) >= 4:
             score = max(score, 78.0)
@@ -235,7 +351,7 @@ def _match_score(upload_name: str, fio: str, role: str) -> float:
 
     if rt and ut:
         overlap_r = len(ut & rt) / max(len(rt), 1)
-        if r and (u in r or r in u):
+        if r and (u in r or r in u or u_lat in r_lat or r_lat in u_lat):
             score = max(score, 85.0)
         if overlap_r >= 0.5:
             score = max(score, 65.0 + 30.0 * overlap_r)

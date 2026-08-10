@@ -6,7 +6,12 @@ import pandas as pd
 import streamlit as st
 import plotly.express as px
 
-from utils import load_uploaded_employees, load_employees_roster, build_roster_attendance
+from utils import (
+    load_uploaded_employees,
+    load_employees_roster,
+    load_staffing,
+    build_roster_attendance,
+)
 
 ROOT = Path(__file__).resolve().parent
 LOGO_PATH = ROOT / "assets" / "akela-logo.png"
@@ -377,58 +382,103 @@ except Exception as exc:
 if df is None:
     df = pd.DataFrame()
 
+staffing = load_staffing()
 roster = load_employees_roster()
 attendance = build_roster_attendance(roster, df if not df.empty else None)
 
 bits = [f"День: {selected_day.strftime('%d.%m.%Y')}"]
 if shared_meta.get("updated_at"):
     bits.append(f"Обновлено: {shared_meta['updated_at']}")
-if not roster.empty:
+if not staffing.empty:
+    bits.append(
+        f"Штат: {staffing.attrs.get('seats_filled', 0)}/"
+        f"{staffing.attrs.get('seats_total', len(staffing))} занято"
+    )
+elif not roster.empty:
     bits.append(f"В списке: {attendance.attrs.get('total', len(attendance))}")
 st.caption(" · ".join(bits))
 
 # =========================
-# Roster: сдал / не сдал
+# Штат + сдача нормативов
 # =========================
-if not roster.empty:
-    total_n = int(attendance.attrs.get("total") or len(attendance))
+if not staffing.empty or not roster.empty:
+    seats_total = int(staffing.attrs.get("seats_total") or len(staffing) or 0)
+    seats_filled = int(staffing.attrs.get("seats_filled") or 0)
+    seats_vacant = int(staffing.attrs.get("seats_vacant") or 0)
+    people_n = int(attendance.attrs.get("total") or len(attendance) or 0)
     sub_n = int(attendance.attrs.get("submitted") or 0)
     miss_n = int(attendance.attrs.get("missing") or 0)
-    rate = (100.0 * sub_n / total_n) if total_n else 0.0
+    people_rate = (100.0 * sub_n / people_n) if people_n else 0.0
+    fill_rate = (100.0 * seats_filled / seats_total) if seats_total else 0.0
+
+    st.markdown('<p class="akela-section-label">Штат</p>', unsafe_allow_html=True)
+    s1, s2, s3, s4 = st.columns(4)
+    s1.metric("Рабочих мест", seats_total or "—")
+    s2.metric("Занято", seats_filled if seats_total else people_n)
+    s3.metric("Вакансии", seats_vacant if seats_total else "—")
+    s4.metric("Заполненность", f"{fill_rate:.0f}%" if seats_total else "—")
 
     st.markdown('<p class="akela-section-label">Сдача нормативов</p>', unsafe_allow_html=True)
     r1, r2, r3, r4 = st.columns(4)
-    r1.metric("Всего сотрудников", total_n)
-    r2.metric("Сдали", sub_n)
+    r1.metric("Сотрудников (уникальные)", people_n)
+    r2.metric("Сдали отчёт", sub_n)
     r3.metric("Не сдали", miss_n)
-    r4.metric("Сдали, %", f"{rate:.0f}%")
+    r4.metric("Сдали, %", f"{people_rate:.0f}%")
 
-    status_filter = st.radio(
+    view_mode = st.radio(
         "Показать",
-        ["Все", "✅ Сдали", "❌ Не сдали"],
+        [
+            "Сотрудники: все",
+            "✅ Сдали",
+            "❌ Не сдали",
+            "Вакансии",
+            "Все места штата",
+        ],
         horizontal=True,
         label_visibility="collapsed",
     )
-    roster_view = attendance.copy()
-    if status_filter == "✅ Сдали":
-        roster_view = roster_view[roster_view["Статус"] != "❌ Не сдал"]
-    elif status_filter == "❌ Не сдали":
-        roster_view = roster_view[roster_view["Статус"] == "❌ Не сдал"]
 
     search_roster = st.text_input(
-        "Поиск по списку",
-        placeholder="ФИО или должность…",
+        "Поиск",
+        placeholder="ФИО, должность или код…",
         key="roster_search",
     )
-    if search_roster:
-        q = search_roster.strip()
-        roster_view = roster_view[
-            roster_view["ФИО"].str.contains(q, case=False, na=False)
-            | roster_view["Должность"].str.contains(q, case=False, na=False)
-        ]
 
-    show_cols = [c for c in ["ФИО", "Должность", "Статус", "KPI", "Категория", "Файл"] if c in roster_view.columns]
-    st.dataframe(roster_view[show_cols], use_container_width=True, hide_index=True)
+    if view_mode in {"Вакансии", "Все места штата"} and not staffing.empty:
+        staff_view = staffing.copy()
+        if view_mode == "Вакансии":
+            staff_view = staff_view[staff_view["Статус_места"] == "Вакансия"]
+        if search_roster:
+            q = search_roster.strip()
+            staff_view = staff_view[
+                staff_view["ФИО"].str.contains(q, case=False, na=False)
+                | staff_view["Должность"].str.contains(q, case=False, na=False)
+                | staff_view["Код"].astype(str).str.contains(q, case=False, na=False)
+            ]
+        show_staff = [
+            c
+            for c in ["№", "Код", "Должность", "ФИО", "Статус_места"]
+            if c in staff_view.columns
+        ]
+        st.dataframe(staff_view[show_staff], use_container_width=True, hide_index=True)
+    else:
+        roster_view = attendance.copy()
+        if view_mode == "✅ Сдали":
+            roster_view = roster_view[roster_view["Статус"] != "❌ Не сдал"]
+        elif view_mode == "❌ Не сдали":
+            roster_view = roster_view[roster_view["Статус"] == "❌ Не сдал"]
+        if search_roster:
+            q = search_roster.strip()
+            roster_view = roster_view[
+                roster_view["ФИО"].str.contains(q, case=False, na=False)
+                | roster_view["Должность"].str.contains(q, case=False, na=False)
+            ]
+        show_cols = [
+            c
+            for c in ["ФИО", "Должность", "Статус", "KPI", "Категория", "Файл"]
+            if c in roster_view.columns
+        ]
+        st.dataframe(roster_view[show_cols], use_container_width=True, hide_index=True)
 
     unmatched = attendance.attrs.get("unmatched_uploads") or []
     if unmatched:
