@@ -50,24 +50,40 @@ def _repair_service_account_json(text: str) -> str:
     """Чинит частую ошибку: живые переносы строк внутри private_key."""
     import re
 
-    text = text.strip()
-    if text.startswith("\ufeff"):
-        text = text.lstrip("\ufeff")
+    text = text.strip().lstrip("\ufeff")
 
     pattern = re.compile(
-        r'"private_key"\s*:\s*"(-----BEGIN PRIVATE KEY-----)([\s\S]*?)(-----END PRIVATE KEY-----)\\n?"',
+        r'"private_key"\s*:\s*"(-----BEGIN PRIVATE KEY-----)\s*([\s\S]*?)\s*(-----END PRIVATE KEY-----)\s*"',
         re.MULTILINE,
     )
 
     def _repl(match: re.Match) -> str:
         begin, middle, end = match.group(1), match.group(2), match.group(3)
         middle = middle.replace("\r\n", "\n").replace("\r", "\n")
-        # убрать уже экранированные \n, затем все реальные переносы → \n
         middle = middle.replace("\\n", "\n")
+        middle = middle.strip("\n")
         middle = middle.replace("\n", "\\n")
-        return f'"private_key": "{begin}{middle}{end}\\n"'
+        return f'"private_key": "{begin}\\n{middle}\\n{end}\\n"'
 
-    repaired = pattern.sub(_repl, text)
+    repaired, n = pattern.subn(_repl, text)
+    if n == 0:
+        # fallback: весь текст — убрать голые control chars вне строк сложно;
+        # попробуем заменить реальные переносы только между BEGIN/END маркерами
+        marker = "-----BEGIN PRIVATE KEY-----"
+        end = "-----END PRIVATE KEY-----"
+        if marker in text and end in text:
+            i = text.find(marker)
+            j = text.find(end) + len(end)
+            chunk = text[i:j]
+            chunk_esc = chunk.replace("\\n", "\n").replace("\r\n", "\n").replace("\r", "\n")
+            chunk_esc = chunk_esc.replace("\n", "\\n")
+            # если private_key уже в кавычках с переносами — переписать целиком значение
+            repaired = re.sub(
+                r'"private_key"\s*:\s*"[\s\S]*?"',
+                f'"private_key": "{chunk_esc}\\n"',
+                text,
+                count=1,
+            )
     return repaired
 
 
