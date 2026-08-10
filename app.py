@@ -304,20 +304,11 @@ except Exception as exc:
 
 if shared_error:
     st.warning(
-        "Общая таблица недоступна без `BITRIX_WEBHOOK_URL` (Secrets / .env). "
-        "Локально файлы всё равно сохранятся на этом компьютере.\n\n"
+        "Общая таблица недоступна без `BITRIX_WEBHOOK_URL` в Streamlit Secrets.\n\n"
         f"`{shared_error}`"
     )
 
-if not _is_streamlit_cloud():
-    st.caption("Файлы сохраняются на этом ПК: `downloads/uploads/Имя/дата_время/`.")
-else:
-    st.caption("На сайте все загрузки видны в общей таблице (Диск Битрикс). Битрикс24-автозагрузку вернём позже.")
-
-uploader_name = st.text_input(
-    "Ваше имя (чтобы было видно, кто загрузил)",
-    placeholder="Например: Шамшодбек",
-)
+st.caption("Загрузите Excel — диаграммы увидит любой, кто откроет эту ссылку.")
 
 uploaded_files = st.file_uploader(
     "Excel-отчёты",
@@ -326,60 +317,42 @@ uploaded_files = st.file_uploader(
     label_visibility="collapsed",
 )
 
-if uploaded_files:
-    if not uploader_name.strip():
-        st.warning("Укажите имя — так будет видно, кто загрузил файлы.")
-    elif st.button("Сохранить загрузку", type="primary"):
-        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        safe_user = "".join(
-            ch if ch.isalnum() or ch in "._- " else "_" for ch in uploader_name.strip()
-        )[:60]
-        local_dir = ROOT / "downloads" / "uploads" / safe_user / stamp
-        local_dir.mkdir(parents=True, exist_ok=True)
-        for f in uploaded_files:
-            (local_dir / f.name).write_bytes(f.getvalue())
-            try:
-                f.seek(0)
-            except Exception:
-                pass
-
-        incoming = load_uploaded_employees(uploaded_files, uploaded_by=uploader_name.strip())
-        if incoming is None or incoming.empty:
-            st.error("Не удалось прочитать % из A1.")
-            st.stop()
-
+if uploaded_files and st.button("Показать всем", type="primary"):
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    local_dir = ROOT / "downloads" / "uploads" / stamp
+    local_dir.mkdir(parents=True, exist_ok=True)
+    for f in uploaded_files:
+        (local_dir / f.name).write_bytes(f.getvalue())
         try:
-            with st.spinner("Сохраняю в общую таблицу…"):
-                df_pub, meta = publish_day_snapshot(
-                    incoming,
-                    window_day=current_slot,
-                    replace=False,
-                    allow_outside_window=True,
-                )
-            if _is_streamlit_cloud():
-                st.success(
-                    f"Готово: все увидят эти данные. В таблице сейчас "
-                    f"{meta.get('count', len(df_pub))} записей."
-                )
-            else:
-                st.success(
-                    f"Сохранено в `{local_dir}` · "
-                    f"в общей таблице {meta.get('count', len(df_pub))} записей."
-                )
-        except Exception as exc:
-            if _is_streamlit_cloud():
-                st.error(
-                    "Не удалось сохранить в общую таблицу. "
-                    "В Streamlit → Settings → Secrets нужен BITRIX_WEBHOOK_URL.\n\n"
-                    f"`{exc}`"
-                )
-            else:
-                st.warning(
-                    f"Файлы сохранены в `{local_dir}`, "
-                    f"но общую таблицу обновить не удалось:\n\n`{exc}`"
-                )
-            st.stop()
+            f.seek(0)
+        except Exception:
+            pass
+
+    incoming = load_uploaded_employees(uploaded_files)
+    if incoming is None or incoming.empty:
+        st.error("Не удалось прочитать % из A1.")
+        st.stop()
+
+    try:
+        with st.spinner("Сохраняю для всех…"):
+            df_pub, meta = publish_day_snapshot(
+                incoming,
+                window_day=current_slot,
+                replace=False,
+                allow_outside_window=True,
+            )
+        st.success(
+            f"Готово. По этой ссылке все увидят данные "
+            f"({meta.get('count', len(df_pub))} записей)."
+        )
         st.rerun()
+    except Exception as exc:
+        st.error(
+            "Не удалось сохранить общую таблицу. "
+            "В Streamlit → Settings → Secrets нужен BITRIX_WEBHOOK_URL.\n\n"
+            f"`{exc}`"
+        )
+        st.stop()
 
 day_options = sorted({current_slot, *available_days}, reverse=True) or [current_slot]
 selected_day = st.selectbox(
@@ -392,7 +365,7 @@ try:
     df, shared_meta = load_day(selected_day)
 except Exception as exc:
     if shared_error:
-        st.info("Общих данных пока нет. Загрузите Excel выше.")
+        st.info("Пока нет общих данных. Загрузите Excel выше.")
         st.stop()
     st.error(f"Не удалось загрузить день: `{exc}`")
     st.stop()
@@ -561,7 +534,7 @@ if search:
 
 display_cols = [
     c
-    for c in ["Сотрудник", "KPI", "Категория", "Файл", "Кто загрузил", "Обновлено"]
+    for c in ["Сотрудник", "KPI", "Категория", "Файл", "Обновлено"]
     if c in filtered_df.columns
 ]
 table = filtered_df[display_cols]
