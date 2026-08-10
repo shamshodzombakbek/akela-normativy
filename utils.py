@@ -22,11 +22,11 @@ def kpi_category(percent: float | None) -> str:
 def extract_overall_percent(excel_source) -> float | None:
     """
     Общий процент из Excel-отчёта по нормативам.
-    Берём ячейку F21 (iloc[20, 5]) — как в шаблоне отчёта.
+    Берём ячейку A1 (iloc[0, 0]).
     """
     try:
         df = pd.read_excel(excel_source, header=None)
-        value = df.iloc[20, 5]
+        value = df.iloc[0, 0]
 
         if isinstance(value, str):
             value = (
@@ -73,7 +73,7 @@ def load_uploaded_employees(uploaded_files):
     for file in uploaded_files:
         try:
             fname = getattr(file, "name", "unknown")
-            # если имя не похоже на норматив — всё равно пробуем F21
+            # общий % из A1
             percent = extract_overall_percent(file)
             if percent is None:
                 print(fname, "не удалось прочитать общий %")
@@ -99,7 +99,7 @@ def load_uploaded_employees(uploaded_files):
 def load_excel_reports_from_dir(folder: str | Path) -> pd.DataFrame:
     """
     Читает Excel-отчёты Normativ_*.
-    Если таких нет — пробует любые xlsx с общим % в F21.
+    Если таких нет — пробует любые xlsx с общим % в A1.
     """
     folder = Path(folder)
     employees = []
