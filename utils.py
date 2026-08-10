@@ -489,3 +489,75 @@ def build_roster_attendance(
     out.attrs["yuklatilgan"] = int((out["Пометка"] == "юклатилган").sum())
     out.attrs["unmatched_uploads"] = unmatched
     return out
+
+
+def build_filled_staffing_with_reports(
+    staffing: pd.DataFrame,
+    attendance: pd.DataFrame | None,
+) -> pd.DataFrame:
+    """Занятые места штатки + статус сдачи отчёта (вакансии исключены)."""
+    if staffing is None or staffing.empty:
+        return pd.DataFrame(
+            columns=[
+                "№",
+                "Код",
+                "Должность",
+                "ФИО",
+                "Пометка",
+                "Статус",
+                "KPI",
+                "Категория",
+                "Файл",
+            ]
+        )
+
+    filled = staffing[staffing["Статус_места"] == "Занято"].copy().reset_index(drop=True)
+    status_by_key: dict[str, dict] = {}
+    if attendance is not None and not attendance.empty:
+        for _, row in attendance.iterrows():
+            key = _normalize_person_text(str(row.get("ФИО") or ""))
+            lat = _to_latin_fold(str(row.get("ФИО") or ""))
+            payload = {
+                "Статус": row.get("Статус") or "❌ Не сдал",
+                "KPI": float(row.get("KPI") or 0),
+                "Категория": row.get("Категория") or kpi_category(None),
+                "Файл": row.get("Файл") or "",
+            }
+            if key:
+                status_by_key[key] = payload
+            if lat:
+                status_by_key[lat] = payload
+
+    statuses, kpis, cats, files = [], [], [], []
+    for _, row in filled.iterrows():
+        fio = str(row.get("ФИО") or "")
+        hit = status_by_key.get(_normalize_person_text(fio)) or status_by_key.get(
+            _to_latin_fold(fio)
+        )
+        if hit:
+            statuses.append(hit["Статус"])
+            kpis.append(hit["KPI"])
+            cats.append(hit["Категория"])
+            files.append(hit["Файл"])
+        else:
+            statuses.append("❌ Не сдал")
+            kpis.append(0.0)
+            cats.append(kpi_category(None))
+            files.append("")
+
+    filled["Статус"] = statuses
+    filled["KPI"] = kpis
+    filled["Категория"] = cats
+    filled["Файл"] = files
+    if "Пометка" not in filled.columns:
+        filled["Пометка"] = ""
+
+    order = {"✅ Сдал": 0, "⚫ 0%": 1, "❌ Не сдал": 2}
+    filled["_s"] = filled["Статус"].map(order).fillna(9)
+    filled = filled.sort_values(["_s", "№"]).drop(columns=["_s"]).reset_index(drop=True)
+
+    submitted_n = int((filled["Статус"] != "❌ Не сдал").sum())
+    filled.attrs["total"] = len(filled)
+    filled.attrs["submitted"] = submitted_n
+    filled.attrs["missing"] = len(filled) - submitted_n
+    return filled
