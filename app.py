@@ -6,7 +6,7 @@ import pandas as pd
 import streamlit as st
 import plotly.express as px
 
-from utils import load_uploaded_employees
+from utils import load_uploaded_employees, load_employees_roster, build_roster_attendance
 
 ROOT = Path(__file__).resolve().parent
 LOGO_PATH = ROOT / "assets" / "akela-logo.png"
@@ -374,24 +374,85 @@ except Exception as exc:
     st.error(f"Не удалось загрузить день: `{exc}`")
     st.stop()
 
-if df is None or df.empty or "KPI" not in getattr(df, "columns", []):
-    st.info("Пока никто не загрузил отчёты — добавьте Excel выше.")
-    st.stop()
+if df is None:
+    df = pd.DataFrame()
 
-bits = [f"День: {selected_day.strftime('%d.%m.%Y')}", f"Записей: {len(df)}"]
+roster = load_employees_roster()
+attendance = build_roster_attendance(roster, df if not df.empty else None)
+
+bits = [f"День: {selected_day.strftime('%d.%m.%Y')}"]
 if shared_meta.get("updated_at"):
     bits.append(f"Обновлено: {shared_meta['updated_at']}")
+if not roster.empty:
+    bits.append(f"В списке: {attendance.attrs.get('total', len(attendance))}")
 st.caption(" · ".join(bits))
 
 # =========================
-# Metrics
+# Roster: сдал / не сдал
 # =========================
-st.markdown('<p class="akela-section-label">Сводка</p>', unsafe_allow_html=True)
+if not roster.empty:
+    total_n = int(attendance.attrs.get("total") or len(attendance))
+    sub_n = int(attendance.attrs.get("submitted") or 0)
+    miss_n = int(attendance.attrs.get("missing") or 0)
+    rate = (100.0 * sub_n / total_n) if total_n else 0.0
+
+    st.markdown('<p class="akela-section-label">Сдача нормативов</p>', unsafe_allow_html=True)
+    r1, r2, r3, r4 = st.columns(4)
+    r1.metric("Всего сотрудников", total_n)
+    r2.metric("Сдали", sub_n)
+    r3.metric("Не сдали", miss_n)
+    r4.metric("Сдали, %", f"{rate:.0f}%")
+
+    status_filter = st.radio(
+        "Показать",
+        ["Все", "✅ Сдали", "❌ Не сдали"],
+        horizontal=True,
+        label_visibility="collapsed",
+    )
+    roster_view = attendance.copy()
+    if status_filter == "✅ Сдали":
+        roster_view = roster_view[roster_view["Статус"] != "❌ Не сдал"]
+    elif status_filter == "❌ Не сдали":
+        roster_view = roster_view[roster_view["Статус"] == "❌ Не сдал"]
+
+    search_roster = st.text_input(
+        "Поиск по списку",
+        placeholder="ФИО или должность…",
+        key="roster_search",
+    )
+    if search_roster:
+        q = search_roster.strip()
+        roster_view = roster_view[
+            roster_view["ФИО"].str.contains(q, case=False, na=False)
+            | roster_view["Должность"].str.contains(q, case=False, na=False)
+        ]
+
+    show_cols = [c for c in ["ФИО", "Должность", "Статус", "KPI", "Категория", "Файл"] if c in roster_view.columns]
+    st.dataframe(roster_view[show_cols], use_container_width=True, hide_index=True)
+
+    unmatched = attendance.attrs.get("unmatched_uploads") or []
+    if unmatched:
+        st.caption(
+            "Отчёты вне списка (не сопоставлены с ФИО/должностью): "
+            + ", ".join(unmatched[:12])
+            + ("…" if len(unmatched) > 12 else "")
+        )
+
+    st.divider()
+
+# =========================
+# Metrics (по загруженным Excel)
+# =========================
+st.markdown('<p class="akela-section-label">Сводка по загруженным %</p>', unsafe_allow_html=True)
+
+if df.empty or "KPI" not in getattr(df, "columns", []):
+    st.info("Пока нет загруженных Excel за этот день — в таблице выше все со статусом «Не сдал».")
+    st.stop()
 
 with_kpi = df[df["KPI"] > 0] if "KPI" in df.columns else df
 
 c1, c2, c3, c4 = st.columns(4)
-c1.metric("Всего", len(df))
+c1.metric("Записей Excel", len(df))
 c2.metric("Средний %", f"{df['KPI'].mean():.1f}%")
 c3.metric("Максимум", f"{df['KPI'].max():.1f}%")
 c4.metric("Минимум", f"{df['KPI'].min():.1f}%")
