@@ -359,6 +359,67 @@ def publish_day_snapshot(
     }
 
 
+def remove_employees_from_day(
+    names: list[str],
+    window_day: date | None = None,
+    match_files: bool = True,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """
+    Удалить ошибочные записи из слота (по Сотрудник / Файл).
+    Работает даже после 20:00 — это правка, не добавление.
+    """
+    store, disk_meta = _load_raw_store()
+    day = window_day or active_window_day()
+    key = day.isoformat()
+    store.setdefault("days", {})
+    slot = store["days"].get(key) or {}
+    employees = list(slot.get("employees") or [])
+    if not employees:
+        raise RuntimeError(f"За {day.strftime('%d.%m.%Y')} нет записей для удаления.")
+
+    targets = {str(n or "").strip().casefold() for n in names if str(n or "").strip()}
+    if not targets:
+        raise RuntimeError("Не выбрано ни одной записи для удаления.")
+
+    def _hit(row: dict) -> bool:
+        name = str(row.get("Сотрудник") or "").strip().casefold()
+        fname = str(row.get("Файл") or "").strip().casefold()
+        if name in targets:
+            return True
+        if match_files and fname:
+            for t in targets:
+                if t and t in fname:
+                    return True
+        return False
+
+    kept = [row for row in employees if not _hit(row)]
+    removed = len(employees) - len(kept)
+    if removed <= 0:
+        raise RuntimeError("Совпадений не найдено — ничего не удалено.")
+
+    now_s = _utc_now()
+    slot = dict(slot)
+    slot["employees"] = kept
+    slot["updated_at"] = now_s
+    slot["window_day"] = key
+    slot.setdefault("bitrix_day", bitrix_target_day(day).isoformat())
+    # frozen не снимаем — только чистим ошибочные строки
+    store["days"][key] = slot
+
+    saved = save_store(store, disk_meta.get("file_id"), disk_meta.get("folder_id"))
+    df = _employees_to_df(kept)
+    file_obj = saved.get("file") if isinstance(saved.get("file"), dict) else {}
+    return df, {
+        "folder_id": disk_meta.get("folder_id"),
+        "file_id": int(file_obj["ID"]) if file_obj.get("ID") else disk_meta.get("file_id"),
+        "window_day": key,
+        "updated_at": now_s,
+        "removed": removed,
+        "count": len(df),
+        "available_days": [d.isoformat() for d in list_available_days(store)],
+    }
+
+
 # Обратная совместимость для старых импортов
 def load_shared_employees() -> tuple[pd.DataFrame, dict[str, Any]]:
     return load_day(active_window_day())

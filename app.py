@@ -294,7 +294,7 @@ PLOTLY_LAYOUT = dict(
 st.markdown('<p class="akela-section-label">Загрузка Excel</p>', unsafe_allow_html=True)
 
 from schedule import active_window_day, now_tashkent, can_upload_for_day
-from shared_store import load_day, publish_day_snapshot
+from shared_store import load_day, publish_day_snapshot, remove_employees_from_day
 
 # Битрикс24-режим сохранён в git — временно только Excel + Google Drive.
 
@@ -397,6 +397,37 @@ except Exception as exc:
 
 if df is None:
     df = pd.DataFrame()
+
+# =========================
+# Удаление ошибочных загрузок
+# =========================
+if not df.empty and "Сотрудник" in df.columns:
+    with st.expander("Удалить ошибочную запись из отчёта"):
+        options = []
+        for _, row in df.iterrows():
+            name = str(row.get("Сотрудник") or "")
+            fname = str(row.get("Файл") or "")
+            kpi = row.get("KPI")
+            label = f"{name} · KPI {kpi}" + (f" · {fname}" if fname else "")
+            options.append((label, name))
+        labels = [o[0] for o in options]
+        picked = st.multiselect(
+            "Выберите записи",
+            labels,
+            placeholder="например ofis-administrator…",
+        )
+        if st.button("Удалить выбранные", type="secondary"):
+            names = [name for label, name in options if label in picked]
+            if not names:
+                st.warning("Ничего не выбрано.")
+            else:
+                try:
+                    with st.spinner("Удаляю из Google Drive…"):
+                        _, meta_del = remove_employees_from_day(names, window_day=selected_day)
+                    st.success(f"Удалено: {meta_del.get('removed', 0)}")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"Не удалось удалить: `{exc}`")
 
 staffing = load_staffing()
 roster = load_employees_roster()
