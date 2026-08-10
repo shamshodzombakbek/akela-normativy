@@ -13,7 +13,7 @@ import requests
 from dotenv import load_dotenv
 
 from bitrix_api import bitrix_call, bitrix_call_full
-from schedule import active_window_day, bitrix_target_day, is_fetch_window, now_tashkent
+from schedule import active_window_day, bitrix_target_day, is_fetch_window, now_tashkent, can_upload_for_day
 from utils import kpi_category
 
 STORAGE_ID = 3
@@ -287,6 +287,11 @@ def publish_day_snapshot(
     """
     store, disk_meta = _load_raw_store()
     day = window_day or active_window_day()
+
+    ok, reason = can_upload_for_day(day)
+    if not ok:
+        raise RuntimeError(reason)
+
     if (
         not allow_outside_window
         and not is_fetch_window()
@@ -296,6 +301,12 @@ def publish_day_snapshot(
 
     key = day.isoformat()
     store.setdefault("days", {})
+    existing_slot = store["days"].get(key) or {}
+    if existing_slot.get("frozen"):
+        raise RuntimeError(
+            f"День {day.strftime('%d.%m.%Y')} уже закрыт после 20:00 — добавлять отчёты нельзя."
+        )
+
     now_s = _utc_now()
     employees = _df_to_employees(incoming_df)
 

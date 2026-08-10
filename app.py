@@ -292,16 +292,23 @@ PLOTLY_LAYOUT = dict(
 
 st.markdown('<p class="akela-section-label">Загрузка Excel</p>', unsafe_allow_html=True)
 
-from schedule import active_window_day, now_tashkent
+from schedule import active_window_day, now_tashkent, can_upload_for_day
 from shared_store import load_day, publish_day_snapshot
 
 # Битрикс24-режим сохранён в git — временно только Excel + Google Drive.
 
 now = now_tashkent()
 current_slot = active_window_day(now)
+upload_ok, upload_reason = can_upload_for_day(current_slot, now)
 
 # Сначала рисуем заголовок загрузки, Google проверяем мягко
-st.caption("Загрузите Excel — диаграммы увидит любой по этой ссылке.")
+if upload_ok:
+    st.caption(
+        f"Загрузите Excel за {current_slot.strftime('%d.%m.%Y')} — "
+        "диаграммы увидит любой по этой ссылке. После 20:00 (Ташкент) за сегодня добавить нельзя."
+    )
+else:
+    st.warning(upload_reason)
 
 shared_error = None
 available_days: list = []
@@ -319,14 +326,23 @@ if shared_error:
         f"`{shared_error}`"
     )
 
-uploaded_files = st.file_uploader(
-    "Excel-отчёты",
-    type=["xlsx", "xls"],
-    accept_multiple_files=True,
-    label_visibility="collapsed",
-)
+if upload_ok:
+    uploaded_files = st.file_uploader(
+        "Excel-отчёты",
+        type=["xlsx", "xls"],
+        accept_multiple_files=True,
+        label_visibility="collapsed",
+    )
+else:
+    uploaded_files = None
+    st.info("Загрузка за этот день закрыта. Можно смотреть уже сохранённые отчёты ниже.")
 
 if uploaded_files and st.button("Показать всем", type="primary"):
+    ok_now, reason_now = can_upload_for_day(current_slot)
+    if not ok_now:
+        st.error(reason_now)
+        st.stop()
+
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     local_dir = ROOT / "downloads" / "uploads" / stamp
     local_dir.mkdir(parents=True, exist_ok=True)
@@ -357,9 +373,7 @@ if uploaded_files and st.button("Показать всем", type="primary"):
         st.rerun()
     except Exception as exc:
         st.error(
-            "Не удалось сохранить в Google Drive. "
-            "Файл `shared_kpi.json` должен быть обычной загрузкой "
-            "(не Google Документ), папка — с правом Редактор для сервисного аккаунта.\n\n"
+            "Не удалось сохранить. "
             f"`{exc}`"
         )
         st.stop()

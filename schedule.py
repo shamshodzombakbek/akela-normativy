@@ -61,6 +61,44 @@ def is_fetch_window(now: datetime | None = None) -> bool:
     return WINDOW_START <= t <= WINDOW_END
 
 
+def is_after_upload_deadline(now: datetime | None = None) -> bool:
+    """После 20:00 по Ташкенту (в этот календарный день)."""
+    now = now or now_tashkent()
+    t = now.timetz().replace(tzinfo=None)
+    return t > WINDOW_END
+
+
+def can_upload_for_day(day: date, now: datetime | None = None) -> tuple[bool, str]:
+    """
+    Можно ли добавить Excel в слот day.
+    После 20:00 (Ташкент) — нельзя добавлять за сегодняшний день.
+    """
+    now = now or now_tashkent()
+    today = now.date()
+    t = now.timetz().replace(tzinfo=None)
+
+    if is_sunday(today):
+        return False, "В воскресенье загрузка отчётов закрыта."
+
+    if day == today and t > WINDOW_END:
+        return (
+            False,
+            "После 20:00 (Ташкент) нельзя добавить отчёты за сегодня. "
+            "Слот закроется до следующего рабочего дня (с 16:00).",
+        )
+
+    # прошлые слоты не трогаем после наступления нового активного дня
+    active = active_window_day(now)
+    if day < active:
+        return (
+            False,
+            f"День {day.strftime('%d.%m.%Y')} уже закрыт для загрузки. "
+            f"Активный слот: {active.strftime('%d.%m.%Y')}.",
+        )
+
+    return True, ""
+
+
 def bitrix_target_day(window_day: date) -> date:
     """
     За какой день качать Normativ.
