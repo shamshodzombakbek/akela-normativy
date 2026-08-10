@@ -441,7 +441,10 @@ if not filled_staff.empty or not vacancies.empty or not roster.empty:
     st.markdown('<p class="akela-section-label">Штат</p>', unsafe_allow_html=True)
     s1, s2, s3, s4 = st.columns(4)
     s1.metric("Рабочих мест", seats_total or "—")
-    s2.metric("Должностей (сдать отчёт)", seats_filled if False else int(filled_staff.attrs.get("total") or seats_filled))
+    s2.metric(
+        "Должностей (сдать отчёт)",
+        int(filled_staff.attrs.get("total") or seats_filled),
+    )
     s3.metric("Сдали отчёт", sub_n)
     s4.metric("Не сдали", miss_n)
     denom = int(filled_staff.attrs.get("people_total") or seats_filled or 0)
