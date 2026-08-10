@@ -358,7 +358,11 @@ def _match_score(upload_name: str, fio: str, role: str) -> float:
     role_aliases = {
         "ofis menejeri": "офис менеджер",
         "ofis menejer": "офис менеджер",
+        "ofis administrator": "офис менеджер",
+        "ofis admin": "офис менеджер",
+        "office administrator": "офис менеджер",
         "office manager": "офис менеджер",
+        "office admin": "офис менеджер",
         "haydovchi": "водитель",
         "xavfsizlik xodimi": "сотрудник охраны",
         "elektronshik muhandis": "инженер электронщик",
@@ -377,8 +381,12 @@ def _match_score(upload_name: str, fio: str, role: str) -> float:
     def role_fold(value: str | None) -> str:
         key_lat = _to_latin_fold(value)
         key = _normalize_person_text(value)
+        # точное совпадение алиаса важнее substring
         for src, dst in role_aliases.items():
-            if key_lat == src or key == src or src in key_lat:
+            if key_lat == src or key == src:
+                return _normalize_person_text(dst)
+        for src, dst in role_aliases.items():
+            if len(src) >= 8 and src in key_lat:
                 return _normalize_person_text(dst)
         key = re.sub(r"\b(ceo|ceoo|cmo|chro|cpro|agm)\b", " ", key)
         return re.sub(r"\s+", " ", key).strip()
@@ -397,15 +405,22 @@ def _match_score(upload_name: str, fio: str, role: str) -> float:
     if r and (u == r or u_lat == r_lat):
         return 92.0
     if u_role and r_role and u_role == r_role:
-        return 90.0
+        return 95.0
+    # ofis + administrator ↔ офис-менеджер / офис администратор
+    if {"ofis", "office"} & set(u_lat.split()) and "administr" in u_lat.replace(" ", ""):
+        if "офис" in r and ("менеджер" in r or "администратор" in r or "админ" in r):
+            score = max(score, 93.0)
+        if "ofis" in r_lat and ("menejer" in r_lat or "administr" in r_lat):
+            score = max(score, 93.0)
 
     ut = _token_variants(upload_name)
     ft = _token_variants(fio)
-    rt = _token_variants(role) | _tokens(r_role) | _tokens(u_role)
+    # важно: НЕ добавлять токены upload в rt — иначе матч 88 ко всем подряд
+    rt = _token_variants(role) | _tokens(r_role)
 
     if ft and ut == ft:
         score = max(score, 98.0)
-    if rt and ut and ut <= rt:
+    if rt and ut and len(ut) >= 2 and ut <= rt:
         score = max(score, 88.0)
     if rt and ut == rt:
         score = max(score, 90.0)
@@ -427,14 +442,14 @@ def _match_score(upload_name: str, fio: str, role: str) -> float:
         if r and (u in r or r in u or u_lat in r_lat or r_lat in u_lat):
             score = max(score, 85.0)
         if u_role and r_role and (u_role in r_role or r_role in u_role):
-            score = max(score, 82.0)
+            score = max(score, 86.0)
         if overlap_r >= 0.5:
             score = max(score, 65.0 + 30.0 * overlap_r)
         elif overlap_r > 0:
             score = max(score, 45.0 + 35.0 * overlap_r)
 
     u_core = {t for t in ut if len(t) >= 4}
-    r_core = {t for t in _tokens(r_role) if len(t) >= 4}
+    r_core = {t for t in (_tokens(r_role) | _token_variants(role)) if len(t) >= 4}
     if u_core and r_core and (u_core & r_core):
         score = max(score, 70.0 + 20.0 * (len(u_core & r_core) / max(len(r_core), 1)))
 
