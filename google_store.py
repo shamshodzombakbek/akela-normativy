@@ -160,7 +160,14 @@ def _find_file(name: str, parent: str) -> dict | None:
     r = requests.get(
         f"{DRIVE_API}/files",
         headers=_headers(),
-        params={"q": q, "spaces": "drive", "fields": "files(id,name)", "pageSize": 5},
+        params={
+            "q": q,
+            "spaces": "drive",
+            "fields": "files(id,name)",
+            "pageSize": 5,
+            "supportsAllDrives": "true",
+            "includeItemsFromAllDrives": "true",
+        },
         timeout=60,
     )
     if r.status_code >= 400:
@@ -169,17 +176,33 @@ def _find_file(name: str, parent: str) -> dict | None:
     return files[0] if files else None
 
 
+def _configured_file_id() -> str | None:
+    _ensure_env()
+    try:
+        import streamlit as st
+
+        if hasattr(st, "secrets") and st.secrets.get("GOOGLE_DRIVE_FILE_ID"):
+            return str(st.secrets["GOOGLE_DRIVE_FILE_ID"]).strip()
+    except Exception:
+        pass
+    return os.getenv("GOOGLE_DRIVE_FILE_ID", "").strip() or None
+
+
 def load_store_dict() -> dict:
     """Читает shared_kpi.json из папки Drive."""
-    parent = folder_id()
-    meta = _find_file(FILE_NAME, parent)
+    file_id = _configured_file_id()
+    meta = None
+    if file_id:
+        meta = {"id": file_id, "name": FILE_NAME}
+    else:
+        meta = _find_file(FILE_NAME, folder_id())
     if not meta:
         return {"timezone": "Asia/Tashkent", "version": 2, "days": {}}
 
     r = requests.get(
         f"{DRIVE_API}/files/{meta['id']}",
         headers=_headers(),
-        params={"alt": "media"},
+        params={"alt": "media", "supportsAllDrives": "true"},
         timeout=60,
     )
     if r.status_code >= 400:
@@ -197,45 +220,32 @@ def load_store_dict() -> dict:
 
 
 def save_store_dict(store: dict) -> dict[str, Any]:
-    """Создаёт или обновляет shared_kpi.json в папке Drive."""
-    parent = folder_id()
+    """
+    Обновляет existing shared_kpi.json.
+    Создавать файл сервисным аккаунтом нельзя (нет квоты) —
+    файл должен заранее создать человек в Drive и расшарить на SA.
+    """
     data = json.dumps(store, ensure_ascii=False, indent=2).encode("utf-8")
-    existing = _find_file(FILE_NAME, parent)
+    file_id = _configured_file_id()
+    existing = {"id": file_id, "name": FILE_NAME} if file_id else _find_file(FILE_NAME, folder_id())
     headers = _headers()
 
-    if existing:
-        r = requests.patch(
-            f"{UPLOAD_API}/files/{existing['id']}",
-            headers={**headers, "Content-Type": "application/json"},
-            params={"uploadType": "media"},
-            data=data,
-            timeout=60,
+    if not existing:
+        raise RuntimeError(
+            "В папке Drive нет файла shared_kpi.json. "
+            "Создайте его вручную в вашей папке (содержимое: "
+            '{"timezone":"Asia/Tashkent","version":2,"days":{}} ), '
+            "расшарьте папку на akela-streamlit@... как Редактор, "
+            "затем повторите загрузку."
         )
-        if r.status_code >= 400:
-            raise RuntimeError(f"Drive update error {r.status_code}: {r.text[:400]}")
-        return {"file_id": existing["id"], "name": FILE_NAME}
 
-    metadata = {"name": FILE_NAME, "parents": [parent]}
-    boundary = "akela_boundary"
-    body = (
-        f"--{boundary}\r\n"
-        f"Content-Type: application/json; charset=UTF-8\r\n\r\n"
-        f"{json.dumps(metadata)}\r\n"
-        f"--{boundary}\r\n"
-        f"Content-Type: application/json\r\n\r\n"
-    ).encode("utf-8") + data + f"\r\n--{boundary}--\r\n".encode("utf-8")
-
-    r = requests.post(
-        f"{UPLOAD_API}/files",
-        headers={
-            **headers,
-            "Content-Type": f"multipart/related; boundary={boundary}",
-        },
-        params={"uploadType": "multipart", "fields": "id,name"},
-        data=body,
+    r = requests.patch(
+        f"{UPLOAD_API}/files/{existing['id']}",
+        headers={**headers, "Content-Type": "application/json"},
+        params={"uploadType": "media", "supportsAllDrives": "true"},
+        data=data,
         timeout=60,
     )
     if r.status_code >= 400:
-        raise RuntimeError(f"Drive create error {r.status_code}: {r.text[:400]}")
-    created = r.json()
-    return {"file_id": created.get("id"), "name": FILE_NAME}
+        raise RuntimeError(f"Drive update error {r.status_code}: {r.text[:500]}")
+    return {"file_id": existing["id"], "name": FILE_NAME}
