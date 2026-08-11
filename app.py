@@ -161,6 +161,10 @@ html, body, [class*="css"] {
     padding: 0.4rem 0.65rem !important;
   }
 
+
+  .cal-wrap { max-width: 100% !important; }
+  .cal-cell { height: 32px !important; }
+
   iframe {
     max-width: 100% !important;
   }
@@ -181,11 +185,13 @@ html, body, [class*="css"] {
 }
 .akela-logo-sm img { max-width: 132px !important; }
 .cal-wrap {
-  max-width: 420px;
+  width: 100%;
+  max-width: 360px;
+  margin: 0;
 }
 .cal-grid {
   display: grid;
-  grid-template-columns: 36px repeat(7, 1fr);
+  grid-template-columns: 32px repeat(7, 1fr);
   gap: 3px;
   font-size: 12px;
 }
@@ -195,12 +201,15 @@ html, body, [class*="css"] {
   justify-content: center;
   height: 28px;
   border-radius: 4px;
-  text-decoration: none;
+  text-decoration: none !important;
   color: #1A2332;
   background: #EEF2F6;
   border: 1px solid transparent;
   font-weight: 600;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
 }
+a.cal-cell:hover { filter: brightness(0.96); color: inherit; }
 .cal-cell.has-data {
   background: #C6F6D5 !important;
   border-color: #1F7A4C;
@@ -419,6 +428,8 @@ div[data-testid="stPlotlyChart"]:hover {
 """,
     unsafe_allow_html=True,
 )
+
+from urllib.parse import urlencode
 
 from i18n import t, month_name, weekday_labels
 from schedule import (
@@ -678,61 +689,75 @@ cal_y, cal_m = st.session_state.cal_year, st.session_state.cal_month
 month_key = f"{cal_y:04d}-{cal_m:02d}"
 data_days_set = {d for d in available_days if d.year == cal_y and d.month == cal_m}
 
+
+def _cal_href(**extra: str) -> str:
+    params: dict[str, str] = {"lang": lang}
+    if _admin_unlocked and _admin_token:
+        params["admin"] = _admin_token
+    params.update({k: str(v) for k, v in extra.items() if v is not None})
+    return "?" + urlencode(params)
+
+
 wd = weekday_labels(lang)
-head = st.columns([0.85] + [1] * 7)
-head[0].caption(t(lang, "week_col"))
-for i, lab in enumerate(wd):
-    head[i + 1].caption(lab)
+cells: list[str] = []
+cells.append(f'<div class="cal-head">{t(lang, "week_col")}</div>')
+for lab in wd:
+    cells.append(f'<div class="cal-head">{lab}</div>')
 
 for wid, ws, we in weeks_in_month(cal_y, cal_m):
-    row = st.columns([0.85] + [1] * 7)
     week_sel = st.session_state.cal_week == wid and st.session_state.cal_day is None
-    with row[0]:
-        if st.button(
-            wid.split("-W")[-1],
-            key=f"cal_w_{wid}",
-            use_container_width=True,
-            type="primary" if week_sel else "secondary",
-            help=f"{ws.strftime('%d.%m')}–{we.strftime('%d.%m')}",
-        ):
-            st.session_state.cal_week = wid
-            st.session_state.cal_day = None
-            for k in ("cal_day", "cal_week", "cal_view"):
-                if k in st.query_params:
-                    del st.query_params[k]
-            st.rerun()
+    wcls = "cal-cell selected" if week_sel else "cal-cell"
+    cells.append(
+        f'<a class="{wcls}" href="{_cal_href(cal_week=wid)}" target="_self" '
+        f'title="{ws.strftime("%d.%m")}–{we.strftime("%d.%m")}">'
+        f'{wid.split("-W")[-1]}</a>'
+    )
     cur = ws
-    for di in range(7):
+    for _ in range(7):
         in_month = cur.month == cal_m and cur.year == cal_y
-        with row[di + 1]:
-            if not in_month:
-                st.button(
-                    " ",
-                    key=f"cal_pad_{wid}_{di}",
-                    use_container_width=True,
-                    disabled=True,
-                )
-            else:
-                has_data = cur in data_days_set
-                is_sel = st.session_state.cal_day == cur
-                label = f"{cur.day}" if not has_data else f"●{cur.day}"
-                if st.button(
-                    label,
-                    key=f"cal_d_{cur.isoformat()}",
-                    use_container_width=True,
-                    type="primary" if is_sel else "secondary",
-                    help=("есть отчёт" if has_data else None),
-                ):
-                    st.session_state.cal_day = cur
-                    st.session_state.cal_week = week_id(cur)
-                    st.session_state.cal_year = cur.year
-                    st.session_state.cal_month = cur.month
-                    for k in ("cal_day", "cal_week", "cal_view"):
-                        if k in st.query_params:
-                            del st.query_params[k]
-                    st.rerun()
+        if not in_month:
+            cells.append('<div class="cal-cell muted">·</div>')
+        else:
+            has_data = cur in data_days_set
+            is_sel = st.session_state.cal_day == cur
+            cls = "cal-cell"
+            if has_data:
+                cls += " has-data"
+            if is_sel:
+                cls += " selected"
+            cells.append(
+                f'<a class="{cls}" href="{_cal_href(cal_day=cur.isoformat())}" '
+                f'target="_self">{cur.day}</a>'
+            )
         cur += timedelta(days=1)
 
+st.markdown(
+    '<div class="cal-wrap"><div class="cal-grid">'
+    + "".join(cells)
+    + "</div></div>",
+    unsafe_allow_html=True,
+)
+# форсируем переход в том же окне (Streamlit иногда открывает <a> в новой вкладке)
+components.html(
+    """
+    <script>
+    (function () {
+      const doc = window.parent.document;
+      doc.querySelectorAll('a.cal-cell').forEach(function (a) {
+        a.addEventListener('click', function (e) {
+          e.preventDefault();
+          e.stopPropagation();
+          const href = a.getAttribute('href') || '';
+          if (!href) return;
+          const u = new URL(href, window.parent.location.href);
+          window.parent.location.href = u.toString();
+        }, true);
+      });
+    })();
+    </script>
+    """,
+    height=0,
+)
 st.caption(t(lang, "cal_hint"))
 
 cal_y, cal_m = st.session_state.cal_year, st.session_state.cal_month
