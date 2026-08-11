@@ -105,6 +105,73 @@ html, body, [class*="css"] {
   max-width: 1180px !important;
 }
 
+/* —— Mobile —— */
+@media (max-width: 768px) {
+  .block-container {
+    padding-top: 0.7rem !important;
+    padding-left: 0.65rem !important;
+    padding-right: 0.65rem !important;
+    padding-bottom: 2rem !important;
+    max-width: 100% !important;
+  }
+
+  div[data-testid="stMetric"] {
+    padding: 0.7rem 0.75rem 0.6rem !important;
+  }
+  div[data-testid="stMetric"] [data-testid="stMetricValue"] {
+    font-size: 1.25rem !important;
+  }
+  div[data-testid="stMetric"] label {
+    font-size: 0.68rem !important;
+  }
+
+  /* метрики и пары колонок: по 2 в ряд, не 4 узких */
+  div[data-testid="stHorizontalBlock"] {
+    flex-wrap: wrap !important;
+    gap: 0.45rem !important;
+  }
+  div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
+    min-width: calc(50% - 0.35rem) !important;
+    flex: 1 1 calc(50% - 0.35rem) !important;
+  }
+
+  /* таблицы можно листать горизонтально */
+  div[data-testid="stDataFrame"] {
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* на таче не раздуваем hover-scale */
+  div[data-testid="stPlotlyChart"]:hover {
+    transform: none !important;
+    box-shadow: none !important;
+  }
+
+  .stButton > button {
+    padding: 0.5rem 0.7rem !important;
+    box-shadow: none !important;
+    min-height: 2.5rem !important;
+  }
+
+  div[role="radiogroup"] {
+    flex-wrap: wrap !important;
+    gap: 0.35rem !important;
+  }
+  div[role="radiogroup"] label {
+    padding: 0.4rem 0.65rem !important;
+  }
+
+  iframe {
+    max-width: 100% !important;
+  }
+}
+
+@media (max-width: 420px) {
+  div[data-testid="stMetric"] [data-testid="stMetricValue"] {
+    font-size: 1.1rem !important;
+  }
+}
+
 /* compact header styles */
 .akela-top {
   display: flex;
@@ -373,6 +440,31 @@ now = now_tashkent()
 current_slot = active_window_day(now)
 upload_ok, upload_reason = can_upload_for_day(current_slot, now)
 
+
+def _is_mobile() -> bool:
+    try:
+        ua = ""
+        if hasattr(st, "context") and getattr(st.context, "headers", None):
+            ua = str(st.context.headers.get("User-Agent") or "")
+        ua = ua.lower()
+        return any(
+            x in ua
+            for x in (
+                "iphone",
+                "ipod",
+                "ipad",
+                "android",
+                "mobile",
+                "opera mini",
+                "iemobile",
+            )
+        )
+    except Exception:
+        return False
+
+
+_mobile = _is_mobile()
+
 # ---- язык (uz / ru / en) ----
 if "lang" not in st.session_state:
     st.session_state.lang = str(st.query_params.get("lang") or "ru").strip().lower()
@@ -427,194 +519,19 @@ try:
 except Exception as exc:
     shared_error = str(exc)
 
-# ---- шапка: логотип | календарь | язык ----
-top_logo, top_cal, top_lang = st.columns([1.1, 2.4, 1.0])
+# ---- шапка: логотип + язык, ниже календарь на всю ширину (удобно на телефоне) ----
+top_logo, top_lang = st.columns([2.2, 1.3])
 with top_logo:
     if LOGO_PATH.exists():
-        st.image(str(LOGO_PATH), width=132)
+        st.image(str(LOGO_PATH), width=96 if _mobile else 132)
     st.caption(t(lang, "subtitle"))
-
-with top_cal:
-    st.markdown(
-        f'<p class="akela-section-label" style="margin:0 0 0.35rem">{t(lang, "calendar")}</p>',
-        unsafe_allow_html=True,
-    )
-    nav_l, nav_c, nav_r = st.columns([1, 3, 1])
-    with nav_l:
-        if st.button("←", use_container_width=True, key="cal_prev"):
-            m = st.session_state.cal_month - 1
-            y = st.session_state.cal_year
-            if m < 1:
-                m, y = 12, y - 1
-            st.session_state.cal_month = m
-            st.session_state.cal_year = y
-            st.session_state.cal_week = None
-            st.session_state.cal_day = None
-            st.rerun()
-    with nav_c:
-        month_label = f"{month_name(lang, st.session_state.cal_month)} {st.session_state.cal_year}"
-        month_view_active = (
-            st.session_state.cal_week is None and st.session_state.cal_day is None
-        )
-        if st.button(
-            month_label,
-            use_container_width=True,
-            key="cal_month_title",
-            type="primary" if month_view_active else "secondary",
-        ):
-            st.session_state.cal_week = None
-            st.session_state.cal_day = None
-            for k in ("cal_day", "cal_week", "cal_view"):
-                if k in st.query_params:
-                    del st.query_params[k]
-            st.rerun()
-    with nav_r:
-        if st.button("→", use_container_width=True, key="cal_next"):
-            m = st.session_state.cal_month + 1
-            y = st.session_state.cal_year
-            if m > 12:
-                m, y = 1, y + 1
-            st.session_state.cal_month = m
-            st.session_state.cal_year = y
-            st.session_state.cal_week = None
-            st.session_state.cal_day = None
-            st.rerun()
-
-    cal_y, cal_m = st.session_state.cal_year, st.session_state.cal_month
-    month_key = f"{cal_y:04d}-{cal_m:02d}"
-    data_days_set = {d for d in available_days if d.year == cal_y and d.month == cal_m}
-
-    # компактный HTML-календарь (зелёные дни с отчётами), клик в том же окне
-    wd = weekday_labels(lang)
-    admin_js = (
-        f'u.searchParams.set("admin", "{_admin_token}");'
-        if _admin_unlocked and _admin_token
-        else 'u.searchParams.delete("admin");'
-    )
-    cells: list[str] = []
-    cells.append(f'<div class="cal-head">{t(lang, "week_col")}</div>')
-    for lab in wd:
-        cells.append(f'<div class="cal-head">{lab}</div>')
-
-    for wid, ws, we in weeks_in_month(cal_y, cal_m):
-        week_sel = st.session_state.cal_week == wid and st.session_state.cal_day is None
-        wcls = "cal-cell selected" if week_sel else "cal-cell"
-        cells.append(
-            f'<button type="button" class="{wcls}" '
-            f'title="{ws.strftime("%d.%m")}–{we.strftime("%d.%m")}" '
-            f"onclick=\"pickWeek('{wid}')\">{wid.split('-W')[-1]}</button>"
-        )
-        cur = ws
-        for _ in range(7):
-            in_month = cur.month == cal_m and cur.year == cal_y
-            if not in_month:
-                cells.append('<div class="cal-cell muted">·</div>')
-            else:
-                has_data = cur in data_days_set
-                is_sel = st.session_state.cal_day == cur
-                cls = "cal-cell"
-                if has_data:
-                    cls += " has-data"
-                if is_sel:
-                    cls += " selected"
-                iso = cur.isoformat()
-                cells.append(
-                    f'<button type="button" class="{cls}" '
-                    f"onclick=\"pickDay('{iso}')\">{cur.day}</button>"
-                )
-            cur += timedelta(days=1)
-
-    cal_html = f"""
-<!DOCTYPE html>
-<html><head><meta charset="utf-8" />
-<style>
-  html, body {{ margin: 0; padding: 0; background: transparent; font-family: Onest, sans-serif; }}
-  .cal-wrap {{ max-width: 420px; }}
-  .cal-grid {{
-    display: grid;
-    grid-template-columns: 36px repeat(7, 1fr);
-    gap: 3px;
-    font-size: 12px;
-  }}
-  .cal-cell {{
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    height: 28px;
-    border-radius: 4px;
-    color: #1A2332;
-    background: #EEF2F6;
-    border: 1px solid transparent;
-    font-weight: 600;
-    cursor: pointer;
-    padding: 0;
-    font-family: inherit;
-    font-size: 12px;
-  }}
-  .cal-cell.has-data {{
-    background: #C6F6D5 !important;
-    border-color: #1F7A4C;
-    color: #14532d;
-  }}
-  .cal-cell.selected {{
-    background: #3E4197 !important;
-    color: #fff !important;
-    border-color: #2A2D7A;
-  }}
-  .cal-cell.muted {{
-    background: transparent;
-    color: transparent;
-    pointer-events: none;
-    border: none;
-  }}
-  .cal-head {{
-    text-align: center;
-    font-size: 10px;
-    color: #7A8B9C;
-    font-weight: 600;
-    height: 20px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }}
-  button.cal-cell:hover {{ filter: brightness(0.96); }}
-</style>
-</head><body>
-<script>
-function _nav(mut) {{
-  const u = new URL(window.parent.location.href);
-  mut(u);
-  u.searchParams.set("lang", "{lang}");
-  {admin_js}
-  window.parent.location.href = u.toString();
-}}
-function pickDay(iso) {{
-  _nav(function(u) {{
-    u.searchParams.set("cal_day", iso);
-    u.searchParams.delete("cal_week");
-    u.searchParams.delete("cal_view");
-  }});
-}}
-function pickWeek(wid) {{
-  _nav(function(u) {{
-    u.searchParams.set("cal_week", wid);
-    u.searchParams.delete("cal_day");
-    u.searchParams.delete("cal_view");
-  }});
-}}
-</script>
-<div class="cal-wrap"><div class="cal-grid">{"".join(cells)}</div></div>
-</body></html>
-"""
-    components.html(cal_html, height=200, scrolling=False)
-    st.caption(t(lang, "cal_hint"))
 
 with top_lang:
     st.markdown(
         f'<p class="akela-section-label" style="margin:0 0 0.45rem">{t(lang, "lang")}</p>',
         unsafe_allow_html=True,
     )
-    # SVG-флаги (не emoji) — одинаково на Windows / Mac / Linux
+    # SVG-флаги (не emoji) — одинаково на Windows / Mac / Linux / телефоне
     flag_svg = {
         "uz": (
             '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 200" width="28" height="20">'
@@ -669,15 +586,17 @@ with top_lang:
     lang_html = f"""
 <!DOCTYPE html>
 <html><head><meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
 <style>
   html, body {{ margin: 0; padding: 0; background: transparent; }}
-  .lang-row {{ display: flex; gap: 8px; align-items: center; }}
+  .lang-row {{ display: flex; gap: 8px; align-items: center; justify-content: flex-end; flex-wrap: wrap; }}
   .lang-btn {{
-    width: 42px; height: 42px; border-radius: 50%;
+    width: 44px; height: 44px; border-radius: 50%;
     border: 2px solid #D5E0EA; background: #fff;
     padding: 0; cursor: pointer;
     display: inline-flex; align-items: center; justify-content: center;
     overflow: hidden; box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
   }}
   .lang-btn.active {{
     border-color: #3E4197;
@@ -697,7 +616,194 @@ function setLang(code) {{
 <div class="lang-row">{"".join(btns)}</div>
 </body></html>
 """
-    components.html(lang_html, height=52, scrolling=False)
+    components.html(lang_html, height=56, scrolling=False)
+
+# календарь — отдельный полный ряд
+st.markdown(
+    f'<p class="akela-section-label" style="margin:0.35rem 0 0.35rem">{t(lang, "calendar")}</p>',
+    unsafe_allow_html=True,
+)
+nav_l, nav_c, nav_r = st.columns([1, 4, 1])
+with nav_l:
+    if st.button("←", use_container_width=True, key="cal_prev"):
+        m = st.session_state.cal_month - 1
+        y = st.session_state.cal_year
+        if m < 1:
+            m, y = 12, y - 1
+        st.session_state.cal_month = m
+        st.session_state.cal_year = y
+        st.session_state.cal_week = None
+        st.session_state.cal_day = None
+        st.rerun()
+with nav_c:
+    month_label = f"{month_name(lang, st.session_state.cal_month)} {st.session_state.cal_year}"
+    month_view_active = (
+        st.session_state.cal_week is None and st.session_state.cal_day is None
+    )
+    if st.button(
+        month_label,
+        use_container_width=True,
+        key="cal_month_title",
+        type="primary" if month_view_active else "secondary",
+    ):
+        st.session_state.cal_week = None
+        st.session_state.cal_day = None
+        for k in ("cal_day", "cal_week", "cal_view"):
+            if k in st.query_params:
+                del st.query_params[k]
+        st.rerun()
+with nav_r:
+    if st.button("→", use_container_width=True, key="cal_next"):
+        m = st.session_state.cal_month + 1
+        y = st.session_state.cal_year
+        if m > 12:
+            m, y = 1, y + 1
+        st.session_state.cal_month = m
+        st.session_state.cal_year = y
+        st.session_state.cal_week = None
+        st.session_state.cal_day = None
+        st.rerun()
+
+cal_y, cal_m = st.session_state.cal_year, st.session_state.cal_month
+month_key = f"{cal_y:04d}-{cal_m:02d}"
+data_days_set = {d for d in available_days if d.year == cal_y and d.month == cal_m}
+
+wd = weekday_labels(lang)
+admin_js = (
+    f'u.searchParams.set("admin", "{_admin_token}");'
+    if _admin_unlocked and _admin_token
+    else 'u.searchParams.delete("admin");'
+)
+cells: list[str] = []
+cells.append(f'<div class="cal-head">{t(lang, "week_col")}</div>')
+for lab in wd:
+    cells.append(f'<div class="cal-head">{lab}</div>')
+
+n_weeks = 0
+for wid, ws, we in weeks_in_month(cal_y, cal_m):
+    n_weeks += 1
+    week_sel = st.session_state.cal_week == wid and st.session_state.cal_day is None
+    wcls = "cal-cell selected" if week_sel else "cal-cell"
+    cells.append(
+        f'<button type="button" class="{wcls}" '
+        f'title="{ws.strftime("%d.%m")}–{we.strftime("%d.%m")}" '
+        f"onclick=\"pickWeek('{wid}')\">{wid.split('-W')[-1]}</button>"
+    )
+    cur = ws
+    for _ in range(7):
+        in_month = cur.month == cal_m and cur.year == cal_y
+        if not in_month:
+            cells.append('<div class="cal-cell muted">·</div>')
+        else:
+            has_data = cur in data_days_set
+            is_sel = st.session_state.cal_day == cur
+            cls = "cal-cell"
+            if has_data:
+                cls += " has-data"
+            if is_sel:
+                cls += " selected"
+            iso = cur.isoformat()
+            cells.append(
+                f'<button type="button" class="{cls}" '
+                f"onclick=\"pickDay('{iso}')\">{cur.day}</button>"
+            )
+        cur += timedelta(days=1)
+
+cal_cell_h = 34 if _mobile else 28
+cal_html = f"""
+<!DOCTYPE html>
+<html><head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<style>
+  html, body {{ margin: 0; padding: 0; background: transparent; font-family: Onest, sans-serif; }}
+  .cal-wrap {{ width: 100%; max-width: 440px; margin: 0 auto; }}
+  .cal-grid {{
+    display: grid;
+    grid-template-columns: minmax(28px, 36px) repeat(7, 1fr);
+    gap: 3px;
+    font-size: 12px;
+  }}
+  .cal-cell {{
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: {cal_cell_h}px;
+    min-height: {cal_cell_h}px;
+    border-radius: 4px;
+    color: #1A2332;
+    background: #EEF2F6;
+    border: 1px solid transparent;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 0;
+    font-family: inherit;
+    font-size: 12px;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }}
+  .cal-cell.has-data {{
+    background: #C6F6D5 !important;
+    border-color: #1F7A4C;
+    color: #14532d;
+  }}
+  .cal-cell.selected {{
+    background: #3E4197 !important;
+    color: #fff !important;
+    border-color: #2A2D7A;
+  }}
+  .cal-cell.muted {{
+    background: transparent;
+    color: transparent;
+    pointer-events: none;
+    border: none;
+  }}
+  .cal-head {{
+    text-align: center;
+    font-size: 10px;
+    color: #7A8B9C;
+    font-weight: 600;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }}
+  button.cal-cell:hover {{ filter: brightness(0.96); }}
+  @media (max-width: 420px) {{
+    .cal-grid {{ gap: 2px; font-size: 11px; }}
+    .cal-cell {{ height: 36px; min-height: 36px; font-size: 12px; }}
+  }}
+</style>
+</head><body>
+<script>
+function _nav(mut) {{
+  const u = new URL(window.parent.location.href);
+  mut(u);
+  u.searchParams.set("lang", "{lang}");
+  {admin_js}
+  window.parent.location.href = u.toString();
+}}
+function pickDay(iso) {{
+  _nav(function(u) {{
+    u.searchParams.set("cal_day", iso);
+    u.searchParams.delete("cal_week");
+    u.searchParams.delete("cal_view");
+  }});
+}}
+function pickWeek(wid) {{
+  _nav(function(u) {{
+    u.searchParams.set("cal_week", wid);
+    u.searchParams.delete("cal_day");
+    u.searchParams.delete("cal_view");
+  }});
+}}
+</script>
+<div class="cal-wrap"><div class="cal-grid">{"".join(cells)}</div></div>
+</body></html>
+"""
+cal_iframe_h = 28 + n_weeks * (cal_cell_h + 4) + (40 if _mobile else 16)
+components.html(cal_html, height=cal_iframe_h, scrolling=False)
+st.caption(t(lang, "cal_hint"))
 
 cal_y, cal_m = st.session_state.cal_year, st.session_state.cal_month
 month_key = f"{cal_y:04d}-{cal_m:02d}"
@@ -1247,8 +1353,6 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-col1, col2 = st.columns(2)
-
 cat_order = ["🟢 75+", "🟡 50+", "🟠 20+", "🔴 1+", "⚫ 0 / не сдал"]
 cat_colors = {
     "🟢 75+": "#22A06B",
@@ -1332,10 +1436,12 @@ def _clickable_pie(fig, *, key: str, height: int = 380) -> None:
     fig.update_layout(height=height, autosize=True)
     fig_json = fig.to_json()
     dom_id = "".join(ch if ch.isalnum() else "_" for ch in key)
+    hover_scale = "none" if _mobile else "scale(1.05)"
     html = f"""
 <!DOCTYPE html>
 <html><head>
 <meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <style>
   html, body {{ margin:0; padding:0; background:transparent; overflow:hidden; }}
@@ -1344,10 +1450,12 @@ def _clickable_pie(fig, *, key: str, height: int = 380) -> None:
     transform-origin: center center;
     border-radius: 2px;
     padding: 4px;
+    width: 100%;
+    box-sizing: border-box;
   }}
   .wrap:hover {{
-    transform: scale(1.05);
-    box-shadow: 0 14px 36px rgba(26,35,50,0.16);
+    transform: {hover_scale};
+    box-shadow: {"none" if _mobile else "0 14px 36px rgba(26,35,50,0.16)"};
   }}
   #{dom_id} {{ width: 100%; height: {height}px; cursor: pointer; }}
 </style>
@@ -1359,13 +1467,15 @@ const layout = Object.assign({{}}, fig.layout || {{}}, {{
   paper_bgcolor: "rgba(0,0,0,0)",
   plot_bgcolor: "rgba(0,0,0,0)",
   height: {height},
-  autosize: true
+  autosize: true,
+  margin: Object.assign({{l:8,r:8,t:40,b:40}}, (fig.layout && fig.layout.margin) || {{}})
 }});
 Plotly.newPlot("{dom_id}", fig.data, layout, {{
   displayModeBar: false,
   responsive: true,
   staticPlot: false
 }}).then(function(gd) {{
+  window.addEventListener("resize", function() {{ Plotly.Plots.resize(gd); }});
   gd.on("plotly_click", function(data) {{
     if (!data || !data.points || !data.points.length) return;
     const p = data.points[0];
@@ -1410,7 +1520,10 @@ if _just_clicked:
         except Exception:
             pass
 
-with col1:
+_pie_h = 300 if _mobile else 380
+_pie_cols = st.columns(1) if _mobile else st.columns(2)
+
+with _pie_cols[0]:
     pie = px.pie(
         submit_stats,
         names="Статус",
@@ -1437,9 +1550,9 @@ with col1:
         margin=dict(l=16, r=16, t=48, b=48),
         hovermode="closest",
     )
-    _clickable_pie(pie, key="pie_submit_click", height=380)
+    _clickable_pie(pie, key="pie_submit_click", height=_pie_h)
 
-with col2:
+with (_pie_cols[0] if _mobile else _pie_cols[1]):
     stats = chart_df["Категория"].value_counts().reindex(cat_order).dropna().reset_index()
     stats.columns = ["Категория", "Количество"]
     if stats.empty:
@@ -1471,7 +1584,7 @@ with col2:
         margin=dict(l=16, r=16, t=48, b=56),
         hovermode="closest",
     )
-    _clickable_pie(pie2, key="pie_cats_click", height=380)
+    _clickable_pie(pie2, key="pie_cats_click", height=_pie_h)
 
 if not has_uploads:
     if _admin_unlocked:
