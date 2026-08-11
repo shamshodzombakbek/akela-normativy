@@ -701,82 +701,67 @@ with top_logo:
         st.image(str(LOGO_PATH), width=72 if _mobile else 100)
     st.caption(t(lang, "subtitle"))
 
-_flag_svgs = {
-    "uz": (
-        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 200" preserveAspectRatio="xMidYMid slice">'
-        '<rect width="300" height="200" fill="#1EB53A"/>'
-        '<rect width="300" height="133.33" fill="#FFFFFF"/>'
-        '<rect width="300" height="66.67" fill="#0099B5"/>'
-        '<rect y="60" width="300" height="6.67" fill="#CE1126"/>'
-        '<rect y="133.33" width="300" height="6.67" fill="#CE1126"/>'
-        '<circle cx="48" cy="33" r="18" fill="#fff"/>'
-        '<circle cx="55" cy="33" r="14" fill="#0099B5"/>'
-        "</svg>"
-    ),
-    "ru": (
-        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 9 6" preserveAspectRatio="xMidYMid slice">'
-        '<rect fill="#fff" width="9" height="6"/>'
-        '<rect fill="#0039A6" y="2" width="9" height="4"/>'
-        '<rect fill="#D52B1E" y="4" width="9" height="2"/>'
-        "</svg>"
-    ),
-    "en": (
-        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 30" preserveAspectRatio="xMidYMid slice">'
-        '<rect width="60" height="30" fill="#012169"/>'
-        '<path d="M0,0 L60,30 M60,0 L0,30" stroke="#fff" stroke-width="6"/>'
-        '<path d="M0,0 L60,30 M60,0 L0,30" stroke="#C8102E" stroke-width="3"/>'
-        '<path d="M30,0 v30 M0,15 h60" stroke="#fff" stroke-width="10"/>'
-        '<path d="M30,0 v30 M0,15 h60" stroke="#C8102E" stroke-width="6"/>'
-        "</svg>"
-    ),
-}
+_flag_emoji = {"uz": "🇺🇿", "ru": "🇷🇺", "en": "🇬🇧"}
 
 with top_lang:
     st.markdown(
-        f'<p class="akela-section-label" style="margin:0 0 0.2rem;text-align:center">'
+        f'<p class="akela-section-label lang-flags-mark" style="margin:0 0 0.2rem;text-align:center">'
         f'{t(lang, "lang")}</p>',
         unsafe_allow_html=True,
     )
-    _flag_btns = []
-    for code in ("uz", "ru", "en"):
-        act = " active" if lang == code else ""
-        _flag_btns.append(
-            f'<button type="button" class="lang-btn{act}" data-lang="{code}" aria-label="{code.upper()}">'
-            f"{_flag_svgs[code]}</button>"
-        )
-    components.html(
-        f"""
+    # Нативные кнопки Streamlit — клики всегда работают (iframe HTML на Cloud часто «глухой»)
+    lf = st.columns(3)
+    for i, code in enumerate(("uz", "ru", "en")):
+        with lf[i]:
+            if st.button(
+                _flag_emoji[code],
+                key=f"lang_{code}",
+                use_container_width=True,
+                type="primary" if lang == code else "secondary",
+            ):
+                if code != lang:
+                    st.session_state.lang = code
+                    st.query_params["lang"] = code
+                    st.rerun()
+    st.markdown(
+        """
 <style>
-  html,body {{ margin:0; padding:0; background:transparent; }}
-  .wrap {{ display:flex; gap:8px; justify-content:center; align-items:center; }}
-  .lang-btn {{
-    width:34px; height:34px; border-radius:50%; border:2px solid #D5E0EA;
-    padding:0; overflow:hidden; cursor:pointer; background:#fff;
-    display:inline-flex; align-items:center; justify-content:center;
-  }}
-  .lang-btn.active {{ border-color:#3E4197; box-shadow:0 0 0 2px rgba(62,65,151,.25); }}
-  .lang-btn svg {{ width:100%; height:100%; display:block; transform:scale(1.35); pointer-events:none; }}
+div[data-testid="column"]:has(.lang-flags-mark) div[data-testid="stHorizontalBlock"] {
+  gap: 6px !important;
+  justify-content: center !important;
+}
+div[data-testid="column"]:has(.lang-flags-mark) div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
+  min-width: 36px !important;
+  flex: 0 0 36px !important;
+  width: 36px !important;
+  max-width: 36px !important;
+}
+div[data-testid="column"]:has(.lang-flags-mark) .stButton { margin: 0 !important; }
+div[data-testid="column"]:has(.lang-flags-mark) button {
+  width: 36px !important;
+  height: 36px !important;
+  min-height: 36px !important;
+  max-height: 36px !important;
+  border-radius: 50% !important;
+  padding: 0 !important;
+  font-size: 1.15rem !important;
+  line-height: 1 !important;
+  box-shadow: none !important;
+  border: 2px solid #D5E0EA !important;
+  background: #fff !important;
+  transform: none !important;
+  overflow: hidden !important;
+}
+div[data-testid="column"]:has(.lang-flags-mark) button[data-testid="baseButton-primary"],
+div[data-testid="column"]:has(.lang-flags-mark) button[kind="primary"] {
+  border-color: #3E4197 !important;
+  box-shadow: 0 0 0 2px rgba(62,65,151,0.25) !important;
+  background: #fff !important;
+  color: inherit !important;
+}
 </style>
-<div class="wrap">{"".join(_flag_btns)}</div>
-<script>
-(function() {{
-  function go(lang) {{
-    try {{
-      const u = new URL(window.parent.location.href);
-      u.searchParams.set('lang', lang);
-      window.parent.location.href = u.toString();
-    }} catch (e) {{}}
-  }}
-  document.querySelectorAll('button[data-lang]').forEach(function(btn) {{
-    btn.addEventListener('click', function(ev) {{
-      ev.preventDefault();
-      go(btn.getAttribute('data-lang'));
-    }});
-  }});
-}})();
-</script>
 """,
-        height=46,
+        unsafe_allow_html=True,
     )
 
 with top_cal:
@@ -877,20 +862,32 @@ with top_cal:
 (function() {{
   function go(setMap, delKeys) {{
     try {{
-      const u = new URL(window.parent.location.href);
+      var parentWin = window.parent;
+      var href = parentWin.location.href;
+      var u = new URL(href);
       (delKeys || []).forEach(function(k) {{ u.searchParams.delete(k); }});
       Object.keys(setMap || {{}}).forEach(function(k) {{
-        const v = setMap[k];
+        var v = setMap[k];
         if (v === null || v === undefined || v === '') u.searchParams.delete(k);
         else u.searchParams.set(k, v);
       }});
-      window.parent.location.href = u.toString();
-    }} catch (e) {{}}
+      parentWin.location.assign(u.toString());
+    }} catch (e) {{
+      try {{
+        var q = [];
+        Object.keys(setMap || {{}}).forEach(function(k) {{
+          if (setMap[k] !== null && setMap[k] !== undefined && setMap[k] !== '')
+            q.push(encodeURIComponent(k) + '=' + encodeURIComponent(setMap[k]));
+        }});
+        window.top.location = '?' + q.join('&');
+      }} catch (e2) {{}}
+    }}
   }}
   document.querySelectorAll('button[data-ym]').forEach(function(btn) {{
     btn.addEventListener('click', function(ev) {{
       ev.preventDefault();
-      const parts = (btn.getAttribute('data-ym') || '').split('-');
+      ev.stopPropagation();
+      var parts = (btn.getAttribute('data-ym') || '').split('-');
       if (parts.length !== 2) return;
       go({{ cal_year: parts[0], cal_month: parts[1], cal_view: 'month' }}, ['cal_day', 'cal_week']);
     }});
@@ -898,18 +895,21 @@ with top_cal:
   document.querySelectorAll('button[data-view-month]').forEach(function(btn) {{
     btn.addEventListener('click', function(ev) {{
       ev.preventDefault();
+      ev.stopPropagation();
       go({{ cal_year: '{cal_y}', cal_month: '{cal_m}', cal_view: 'month' }}, ['cal_day', 'cal_week']);
     }});
   }});
   document.querySelectorAll('button[data-day]').forEach(function(btn) {{
     btn.addEventListener('click', function(ev) {{
       ev.preventDefault();
+      ev.stopPropagation();
       go({{ cal_day: btn.getAttribute('data-day') }}, ['cal_week', 'cal_view']);
     }});
   }});
   document.querySelectorAll('button[data-week]').forEach(function(btn) {{
     btn.addEventListener('click', function(ev) {{
       ev.preventDefault();
+      ev.stopPropagation();
       go({{ cal_week: btn.getAttribute('data-week') }}, ['cal_day', 'cal_view']);
     }});
   }});
