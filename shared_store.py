@@ -82,7 +82,26 @@ def _download_file_bytes(file_meta: dict) -> bytes:
 
 
 def _empty_store() -> dict:
-    return {"timezone": "Asia/Tashkent", "version": 2, "days": {}}
+    return {
+        "timezone": "Asia/Tashkent",
+        "version": 2,
+        "days": {},
+        "staffing_overrides": {},
+    }
+
+
+def _norm_code(code: str | None) -> str:
+    return str(code or "").strip()
+
+
+def _save_meta(saved: dict, disk_meta: dict, **extra: Any) -> dict[str, Any]:
+    file_obj = saved.get("file") if isinstance(saved.get("file"), dict) else {}
+    return {
+        "folder_id": disk_meta.get("folder_id"),
+        "file_id": int(file_obj["ID"]) if file_obj.get("ID") else disk_meta.get("file_id"),
+        "backend": saved.get("backend") or disk_meta.get("backend"),
+        **extra,
+    }
 
 
 def _migrate_payload(payload: dict) -> dict:
@@ -218,7 +237,9 @@ def list_available_days(store: dict | None = None) -> list[date]:
     days = []
     for key, slot in (store.get("days") or {}).items():
         try:
-            if slot.get("employees"):
+            has_emp = bool(slot.get("employees"))
+            has_ov = bool(slot.get("seat_overrides"))
+            if has_emp or has_ov:
                 days.append(date.fromisoformat(key))
         except Exception:
             continue
@@ -232,6 +253,9 @@ def load_day(window_day: date | None = None) -> tuple[pd.DataFrame, dict[str, An
     key = day.isoformat()
     slot = (store.get("days") or {}).get(key) or {}
     df = _employees_to_df(slot.get("employees") or [])
+    seat_overrides = slot.get("seat_overrides") or {}
+    if not isinstance(seat_overrides, dict):
+        seat_overrides = {}
     return df, {
         **disk_meta,
         "window_day": key,
@@ -240,6 +264,7 @@ def load_day(window_day: date | None = None) -> tuple[pd.DataFrame, dict[str, An
         "frozen": bool(slot.get("frozen")),
         "frozen_at": slot.get("frozen_at"),
         "count": len(df),
+        "seat_overrides": seat_overrides,
         "available_days": [d.isoformat() for d in list_available_days(store)],
         "can_fetch": is_fetch_window() and day == active_window_day(),
     }
@@ -325,12 +350,17 @@ def publish_day_snapshot(
             merged = incoming.drop(columns=["_key"], errors="ignore")
         employees = _df_to_employees(merged)
 
+    preserved_overrides = existing_slot.get("seat_overrides") or {}
+    if not isinstance(preserved_overrides, dict):
+        preserved_overrides = {}
+
     store["days"][key] = {
         "window_day": key,
         "bitrix_day": bitrix_target_day(day).isoformat(),
         "employees": employees,
         "updated_at": now_s,
         "frozen": False,
+        "seat_overrides": preserved_overrides,
     }
 
     # заморозить прошлые дни
@@ -343,20 +373,23 @@ def publish_day_snapshot(
             slot["frozen"] = True
             slot.setdefault("frozen_at", now_s)
 
+    # корневые staffing_overrides не трогаем
+    store.setdefault("staffing_overrides", store.get("staffing_overrides") or {})
+
     saved = save_store(store, disk_meta.get("file_id"), disk_meta.get("folder_id"))
     df = _employees_to_df(employees)
-    file_obj = saved.get("file") if isinstance(saved.get("file"), dict) else {}
-    return df, {
-        "folder_id": disk_meta.get("folder_id"),
-        "file_id": int(file_obj["ID"]) if file_obj.get("ID") else disk_meta.get("file_id"),
-        "window_day": key,
-        "bitrix_day": bitrix_target_day(day).isoformat(),
-        "updated_at": now_s,
-        "frozen": False,
-        "count": len(df),
-        "available_days": [d.isoformat() for d in list_available_days(store)],
-        "can_fetch": True,
-    }
+    return df, _save_meta(
+        saved,
+        disk_meta,
+        window_day=key,
+        bitrix_day=bitrix_target_day(day).isoformat(),
+        updated_at=now_s,
+        frozen=False,
+        count=len(df),
+        seat_overrides=preserved_overrides,
+        available_days=[d.isoformat() for d in list_available_days(store)],
+        can_fetch=True,
+    )
 
 
 def remove_employees_from_day(
@@ -408,16 +441,289 @@ def remove_employees_from_day(
 
     saved = save_store(store, disk_meta.get("file_id"), disk_meta.get("folder_id"))
     df = _employees_to_df(kept)
-    file_obj = saved.get("file") if isinstance(saved.get("file"), dict) else {}
-    return df, {
-        "folder_id": disk_meta.get("folder_id"),
-        "file_id": int(file_obj["ID"]) if file_obj.get("ID") else disk_meta.get("file_id"),
-        "window_day": key,
+    return df, _save_meta(
+        saved,
+        disk_meta,
+        window_day=key,
+        updated_at=now_s,
+        removed=removed,
+        count=len(df),
+        available_days=[d.isoformat() for d in list_available_days(store)],
+    )
+
+
+def load_staffing_overrides() -> dict[str, dict]:
+    """Корневые кадровые overrides по Код места."""
+    store, _ = _load_raw_store()
+    raw = store.get("staffing_overrides") or {}
+    if not isinstance(raw, dict):
+        return {}
+    return { _norm_code(k): dict(v) for k, v in raw.items() if _norm_code(k) and isinstance(v, dict) }
+
+
+def load_seat_overrides(window_day: date | None = None) -> dict[str, dict]:
+    store, _ = _load_raw_store()
+    day = window_day or active_window_day()
+    slot = (store.get("days") or {}).get(day.isoformat()) or {}
+    raw = slot.get("seat_overrides") or {}
+    if not isinstance(raw, dict):
+        return {}
+    return { _norm_code(k): dict(v) for k, v in raw.items() if _norm_code(k) and isinstance(v, dict) }
+
+
+def upsert_seat_override(
+    code: str,
+    status: str,
+    kpi: float | None = None,
+    window_day: date | None = None,
+    file_name: str = "",
+) -> dict[str, Any]:
+    """
+    Ручной статус сдачи по месту (Код) на день.
+    Работает в любое время, в т.ч. после freeze.
+    """
+    code_key = _norm_code(code)
+    if not code_key:
+        raise RuntimeError("Не указан код места.")
+    status = str(status or "").strip()
+    allowed = {"✅ Сдал", "⚫ 0%", "❌ Не сдал"}
+    if status not in allowed:
+        raise RuntimeError(f"Статус должен быть один из: {', '.join(sorted(allowed))}")
+
+    store, disk_meta = _load_raw_store()
+    day = window_day or active_window_day()
+    key = day.isoformat()
+    store.setdefault("days", {})
+    slot = dict(store["days"].get(key) or {})
+    overrides = dict(slot.get("seat_overrides") or {})
+    if not isinstance(overrides, dict):
+        overrides = {}
+
+    try:
+        kpi_val = float(kpi) if kpi is not None else 0.0
+    except Exception:
+        kpi_val = 0.0
+    if status in {"❌ Не сдал", "⚫ 0%"}:
+        kpi_val = 0.0
+    if status == "❌ Не сдал":
+        cat = kpi_category(None)
+        file_out = ""
+    elif status == "⚫ 0%":
+        cat = kpi_category(0.0)
+        file_out = str(file_name or "")
+    else:
+        cat = kpi_category(kpi_val if kpi_val > 0 else None)
+        file_out = str(file_name or "")
+
+    now_s = _utc_now()
+    overrides[code_key] = {
+        "Статус": status,
+        "KPI": kpi_val,
+        "Категория": cat,
+        "Файл": file_out,
+        "source": "admin",
         "updated_at": now_s,
-        "removed": removed,
-        "count": len(df),
-        "available_days": [d.isoformat() for d in list_available_days(store)],
     }
+
+    slot["seat_overrides"] = overrides
+    slot["window_day"] = key
+    slot.setdefault("bitrix_day", bitrix_target_day(day).isoformat())
+    slot.setdefault("employees", slot.get("employees") or [])
+    slot["updated_at"] = now_s
+    store["days"][key] = slot
+    store.setdefault("staffing_overrides", store.get("staffing_overrides") or {})
+
+    saved = save_store(store, disk_meta.get("file_id"), disk_meta.get("folder_id"))
+    return _save_meta(
+        saved,
+        disk_meta,
+        window_day=key,
+        updated_at=now_s,
+        code=code_key,
+        seat_overrides=overrides,
+    )
+
+
+def clear_seat_override(
+    code: str,
+    window_day: date | None = None,
+) -> dict[str, Any]:
+    """Убрать ручную правку статуса по месту."""
+    code_key = _norm_code(code)
+    if not code_key:
+        raise RuntimeError("Не указан код места.")
+
+    store, disk_meta = _load_raw_store()
+    day = window_day or active_window_day()
+    key = day.isoformat()
+    store.setdefault("days", {})
+    slot = dict(store["days"].get(key) or {})
+    overrides = dict(slot.get("seat_overrides") or {})
+    if code_key not in overrides:
+        raise RuntimeError(f"Для {code_key} нет ручной правки статуса.")
+    overrides.pop(code_key, None)
+    now_s = _utc_now()
+    slot["seat_overrides"] = overrides
+    slot["window_day"] = key
+    slot.setdefault("bitrix_day", bitrix_target_day(day).isoformat())
+    slot.setdefault("employees", slot.get("employees") or [])
+    slot["updated_at"] = now_s
+    store["days"][key] = slot
+    store.setdefault("staffing_overrides", store.get("staffing_overrides") or {})
+
+    saved = save_store(store, disk_meta.get("file_id"), disk_meta.get("folder_id"))
+    return _save_meta(
+        saved,
+        disk_meta,
+        window_day=key,
+        updated_at=now_s,
+        code=code_key,
+        removed=True,
+        seat_overrides=overrides,
+    )
+
+
+def admin_upsert_employee(
+    name: str,
+    kpi: float = 0.0,
+    file_name: str = "",
+    window_day: date | None = None,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Добавить/обновить Excel-строку дня без окна 16–20 и без блока frozen."""
+    emp_name = str(name or "").strip()
+    if not emp_name:
+        raise RuntimeError("Укажите имя сотрудника / название отчёта.")
+
+    store, disk_meta = _load_raw_store()
+    day = window_day or active_window_day()
+    key = day.isoformat()
+    store.setdefault("days", {})
+    slot = dict(store["days"].get(key) or {})
+    employees = list(slot.get("employees") or [])
+    now_s = _utc_now()
+    try:
+        kpi_val = float(kpi)
+    except Exception:
+        kpi_val = 0.0
+
+    row = {
+        "Сотрудник": emp_name,
+        "KPI": kpi_val,
+        "Категория": kpi_category(kpi_val if kpi_val > 0 else None),
+        "Файл": str(file_name or "") or "(admin)",
+        "Обновлено": now_s,
+        "Кто загрузил": "admin",
+    }
+    fold = emp_name.casefold()
+    kept = [
+        r
+        for r in employees
+        if str(r.get("Сотрудник") or "").strip().casefold() != fold
+    ]
+    kept.append(row)
+
+    preserved = slot.get("seat_overrides") or {}
+    if not isinstance(preserved, dict):
+        preserved = {}
+    slot["employees"] = kept
+    slot["seat_overrides"] = preserved
+    slot["window_day"] = key
+    slot.setdefault("bitrix_day", bitrix_target_day(day).isoformat())
+    slot["updated_at"] = now_s
+    # frozen не снимаем
+    store["days"][key] = slot
+    store.setdefault("staffing_overrides", store.get("staffing_overrides") or {})
+
+    saved = save_store(store, disk_meta.get("file_id"), disk_meta.get("folder_id"))
+    df = _employees_to_df(kept)
+    return df, _save_meta(
+        saved,
+        disk_meta,
+        window_day=key,
+        updated_at=now_s,
+        count=len(df),
+        available_days=[d.isoformat() for d in list_available_days(store)],
+    )
+
+
+def set_staffing_override(
+    code: str,
+    fio: str = "",
+    status: str = "Занято",
+    note: str = "",
+    action: str = "replace",
+    prev_fio: str | None = None,
+) -> dict[str, Any]:
+    """
+    Кадровая правка места: увольнение / замена / заполнение вакансии.
+    Ключ — Код из staffing.csv.
+    """
+    code_key = _norm_code(code)
+    if not code_key:
+        raise RuntimeError("Не указан код места.")
+
+    status_norm = str(status or "").strip()
+    if status_norm not in {"Занято", "Вакансия"}:
+        raise RuntimeError("Статус места: Занято или Вакансия.")
+    fio_clean = str(fio or "").strip()
+    if status_norm == "Занято" and not fio_clean:
+        raise RuntimeError("Для занятого места укажите ФИО.")
+    if status_norm == "Вакансия":
+        fio_clean = ""
+
+    store, disk_meta = _load_raw_store()
+    overrides = dict(store.get("staffing_overrides") or {})
+    if not isinstance(overrides, dict):
+        overrides = {}
+    now_s = _utc_now()
+    existing = dict(overrides.get(code_key) or {})
+    payload = {
+        "ФИО": fio_clean,
+        "Статус_места": status_norm,
+        "Пометка": str(note or "").strip(),
+        "action": str(action or "replace").strip() or "replace",
+        "updated_at": now_s,
+    }
+    if prev_fio is not None:
+        payload["prev_fio"] = str(prev_fio).strip()
+    elif existing.get("prev_fio") and status_norm == "Вакансия":
+        payload["prev_fio"] = existing.get("prev_fio")
+    overrides[code_key] = payload
+    store["staffing_overrides"] = overrides
+
+    saved = save_store(store, disk_meta.get("file_id"), disk_meta.get("folder_id"))
+    return _save_meta(
+        saved,
+        disk_meta,
+        code=code_key,
+        updated_at=now_s,
+        staffing_overrides=overrides,
+    )
+
+
+def clear_staffing_override(code: str) -> dict[str, Any]:
+    """Вернуть место к значению из staffing.csv."""
+    code_key = _norm_code(code)
+    if not code_key:
+        raise RuntimeError("Не указан код места.")
+
+    store, disk_meta = _load_raw_store()
+    overrides = dict(store.get("staffing_overrides") or {})
+    if code_key not in overrides:
+        raise RuntimeError(f"Для {code_key} нет кадровой правки.")
+    overrides.pop(code_key, None)
+    now_s = _utc_now()
+    store["staffing_overrides"] = overrides
+
+    saved = save_store(store, disk_meta.get("file_id"), disk_meta.get("folder_id"))
+    return _save_meta(
+        saved,
+        disk_meta,
+        code=code_key,
+        updated_at=now_s,
+        removed=True,
+        staffing_overrides=overrides,
+    )
 
 
 # Обратная совместимость для старых импортов

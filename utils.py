@@ -254,7 +254,10 @@ def _token_variants(value: str | None) -> set[str]:
     return raw | lat | fuzzy
 
 
-def load_staffing(path: str | Path | None = None) -> pd.DataFrame:
+def load_staffing(
+    path: str | Path | None = None,
+    overrides: dict | None = None,
+) -> pd.DataFrame:
     """Штатная расстановка: места (занято / вакансия). «юклатилган» = занято."""
     source = Path(path) if path else STAFFING_PATH
     if not source.is_file():
@@ -287,6 +290,7 @@ def load_staffing(path: str | Path | None = None) -> pd.DataFrame:
     out["ФИО"] = out["ФИО"].fillna("").astype(str).str.strip()
     out["Должность"] = out["Должность"].fillna("").astype(str).str.strip()
     out["Пометка"] = out["Пометка"].fillna("").astype(str).str.strip()
+    out["Код"] = out["Код"].fillna("").astype(str).str.strip()
 
     # юклатилган в ФИО или пометке — это сотрудник, не вакансия
     yuk_mask = (
@@ -312,10 +316,49 @@ def load_staffing(path: str | Path | None = None) -> pd.DataFrame:
     out.loc[~vacant_mask, "Статус_места"] = "Занято"
     out.loc[out["Статус_места"] == "Вакансия", "Пометка"] = ""
 
+    # Живые кадровые правки из store (по Код), поверх CSV
+    if overrides and isinstance(overrides, dict):
+        out["_ov"] = False
+        for code, ov in overrides.items():
+            if not isinstance(ov, dict):
+                continue
+            code_key = str(code or "").strip()
+            if not code_key:
+                continue
+            mask = out["Код"] == code_key
+            if not mask.any():
+                continue
+            if "ФИО" in ov:
+                out.loc[mask, "ФИО"] = str(ov.get("ФИО") or "").strip()
+            if "Пометка" in ov:
+                out.loc[mask, "Пометка"] = str(ov.get("Пометка") or "").strip()
+            seat_st = str(ov.get("Статус_места") or "").strip()
+            if seat_st in {"Занято", "Вакансия"}:
+                out.loc[mask, "Статус_места"] = seat_st
+            if seat_st == "Вакансия":
+                out.loc[mask, "ФИО"] = ""
+                out.loc[mask, "Пометка"] = ""
+            out.loc[mask, "_ov"] = True
+        # пересчёт статусов для строк без override
+        fio = out["ФИО"].fillna("").astype(str).str.strip()
+        auto_vacant = (
+            ~out["_ov"]
+            & (
+                fio.eq("")
+                | fio.str.casefold().isin({"nan", "none", "вакант"})
+                | out["Статус_места"].astype(str).str.contains("вакан", case=False, na=False)
+            )
+            & ~out["Пометка"].astype(str).str.contains("юклатилган", case=False, na=False)
+        )
+        out.loc[auto_vacant, "Статус_места"] = "Вакансия"
+        out.loc[~auto_vacant & ~out["_ov"] & fio.ne(""), "Статус_места"] = "Занято"
+        out = out.drop(columns=["_ov"])
+
     out.attrs["seats_total"] = int(len(out))
     out.attrs["seats_filled"] = int((out["Статус_места"] == "Занято").sum())
     out.attrs["seats_vacant"] = int((out["Статус_места"] == "Вакансия").sum())
     out.attrs["seats_yuklatilgan"] = int((out["Пометка"] == "юклатилган").sum())
+    out.attrs["staffing_overrides"] = dict(overrides or {}) if isinstance(overrides, dict) else {}
     return out
 
 
@@ -432,13 +475,12 @@ def _match_score(upload_name: str, fio: str, role: str) -> float:
         return 0.0
 
     score = 0.0
-    # Полное совпадение ФИО — сразу; роль сверяем с линейками (не early-return без delta)
     if u == f or u_lat == f_lat or u_fuzzy == f_fuzzy:
         return 100.0
     if r and (u == r or u_lat == r_lat):
-        score = 92.0
+        return 92.0
     if u_role and r_role and u_role == r_role:
-        score = max(score, 95.0)
+        return 95.0
 
     # Имя / фамилия: латиница ↔ кириллица
     u_name_toks = _latin_tokens(upload_name)
@@ -510,88 +552,7 @@ def _match_score(upload_name: str, fio: str, role: str) -> float:
     if u_core and r_core and (u_core & r_core):
         score = max(score, 70.0 + 20.0 * (len(u_core & r_core) / max(len(r_core), 1)))
 
-    # Проект / продукт / линейка PRINT·PLAST·METAL — не смешивать
-    score += _sales_line_delta(upload_name, role)
-
     return score
-
-
-def _sales_line_delta(upload_name: str | None, role: str | None) -> float:
-    """
-    Штраф/бонус, чтобы «проектных PRINT & PACK» не считался
-    за «продуктных PRINT & PACK» и наоборот.
-    """
-    u = _latin_fuzzy(upload_name)
-    r = _latin_fuzzy(role)
-    u_cyr = _normalize_person_text(upload_name)
-    r_cyr = _normalize_person_text(role)
-    blob_u = f"{u} {u_cyr}"
-    blob_r = f"{r} {r_cyr}"
-
-    def has(*words: str) -> tuple[bool, bool]:
-        return (any(w in blob_u for w in words), any(w in blob_r for w in words))
-
-    delta = 0.0
-    u_proj, r_proj = has("proekt", "project", "проект")
-    u_prod, r_prod = has("produkt", "product", "продукт")
-    if u_proj and r_prod and not r_proj:
-        delta -= 40.0
-    if u_prod and r_proj and not r_prod:
-        delta -= 40.0
-    if u_proj and r_proj:
-        delta += 18.0
-    if u_prod and r_prod:
-        delta += 18.0
-
-    # PRINT & PACK vs PLAST & PACK vs METALWORK / WOODWORK
-    def line_id(blob: str) -> str | None:
-        if "print" in blob and "pack" in blob:
-            return "print_pack"
-        if "plast" in blob and "pack" in blob:
-            return "plast_pack"
-        if "metalwork" in blob or ("metal" in blob and "work" in blob):
-            return "metalwork"
-        if "woodwork" in blob or ("wood" in blob and "work" in blob):
-            return "woodwork"
-        if "metal" in blob and "pack" not in blob and "print" not in blob:
-            return "metalwork"
-        return None
-
-    lu, lr = line_id(blob_u), line_id(blob_r)
-    if lu and lr:
-        if lu == lr:
-            delta += 28.0
-        else:
-            delta -= 55.0
-    elif lu and not lr:
-        # в файле указана линейка — место без линейки не берём
-        delta -= 40.0
-
-    u_buy, r_buy = has("zakup", "xarid", "закуп", " заку")
-    u_sale, r_sale = has("sotuv", "sales", "продаж", "продажа")
-    if u_sale and r_buy and not r_sale:
-        delta -= 55.0
-    if u_buy and r_sale and not r_buy:
-        delta -= 55.0
-    if u_sale and not r_sale and not r_buy:
-        # «создание продукта» ≠ продажи
-        delta -= 45.0
-    if u_buy and not r_buy:
-        delta -= 45.0
-    if (u_sale and r_sale) or (u_buy and r_buy):
-        delta += 12.0
-
-    # Менеджер ≠ начальник отдела
-    u_mgr, r_mgr = has("menejer", "manager", "менеджер")
-    u_boss, r_boss = has("nachalnik", "nachal", "начальник", "boshliq")
-    if u_mgr and not u_boss and r_boss:
-        delta -= 60.0
-    if u_boss and not u_mgr and r_mgr and not r_boss:
-        delta -= 60.0
-    if u_mgr and r_mgr and not r_boss:
-        delta += 16.0
-
-    return delta
 
 
 def build_roster_attendance(
@@ -712,6 +673,7 @@ def build_filled_staffing_with_reports(
     attendance: pd.DataFrame | None,
     submitted: pd.DataFrame | None = None,
     min_score: float = 42.0,
+    seat_overrides: dict | None = None,
 ) -> pd.DataFrame:
     """Занятые места штатки + статус сдачи. Директора в списке, но вне графиков."""
     if staffing is None or staffing.empty:
@@ -754,20 +716,17 @@ def build_filled_staffing_with_reports(
                 }
             )
 
-    pairs: list[tuple[float, int, int, int]] = []
+    pairs: list[tuple[float, int, int]] = []
     for ui, up in enumerate(uploads):
         for ri, row in filled.iterrows():
             if bool(filled.at[ri, "_exempt"]):
                 continue
             sc = _match_score(up["name"], str(row.get("ФИО") or ""), str(row.get("Должность") or ""))
             if sc >= min_score:
-                # юклатилган ниже приоритетом при равном score
-                yuk = 1 if str(row.get("Пометка") or "").casefold() == "юклатилган" else 0
-                pairs.append((sc, -yuk, ui, int(ri)))
-    # выше score, без юклатилган раньше
-    pairs.sort(key=lambda x: (x[0], x[1]), reverse=True)
+                pairs.append((sc, ui, int(ri)))
+    pairs.sort(key=lambda x: x[0], reverse=True)
 
-    for sc, _yuk, ui, ri in pairs:
+    for sc, ui, ri in pairs:
         if uploads[ui]["used"] or bool(filled.at[ri, "_matched"]):
             continue
         up = uploads[ui]
@@ -779,8 +738,80 @@ def build_filled_staffing_with_reports(
         filled.at[ri, "Категория"] = kpi_category(kpi if kpi > 0 else None)
         filled.at[ri, "Файл"] = up["file"]
 
-    # НЕ переносим сдачу с одной должности человека на другую
-    # (проект PRINT ≠ продукт PRINT; юклатилган отдельно)
+    if attendance is not None and not attendance.empty:
+        for _, row in attendance.iterrows():
+            if str(row.get("Статус") or "") == "❌ Не сдал":
+                continue
+            fio_key = _normalize_person_text(str(row.get("ФИО") or ""))
+            lat = _to_latin_fold(str(row.get("ФИО") or ""))
+            role = str(row.get("Должность") or "")
+            payload_status = row.get("Статус") or "✅ Сдал"
+            payload_kpi = float(row.get("KPI") or 0)
+            payload_cat = row.get("Категория") or kpi_category(
+                payload_kpi if payload_kpi > 0 else None
+            )
+            payload_file = row.get("Файл") or ""
+            best_ri, best_sc = None, -1.0
+            for ri, seat in filled.iterrows():
+                if bool(filled.at[ri, "_matched"]) or bool(filled.at[ri, "_exempt"]):
+                    continue
+                seat_key = _normalize_person_text(str(seat.get("ФИО") or ""))
+                seat_lat = _to_latin_fold(str(seat.get("ФИО") or ""))
+                sc = 0.0
+                if fio_key and seat_key == fio_key:
+                    sc = 100.0
+                elif lat and seat_lat == lat:
+                    sc = 95.0
+                else:
+                    continue
+                sc += min(
+                    20.0,
+                    _match_score(role, str(seat.get("ФИО") or ""), str(seat.get("Должность") or ""))
+                    * 0.1,
+                )
+                if sc > best_sc:
+                    best_sc, best_ri = sc, int(ri)
+            if best_ri is not None:
+                filled.at[best_ri, "_matched"] = True
+                filled.at[best_ri, "Статус"] = payload_status
+                filled.at[best_ri, "KPI"] = payload_kpi
+                filled.at[best_ri, "Категория"] = payload_cat
+                filled.at[best_ri, "Файл"] = payload_file
+
+    # Ручные статусы админа по Код — поверх матчинга (кроме «Не обязан»)
+    if seat_overrides and isinstance(seat_overrides, dict) and "Код" in filled.columns:
+        for ri, row in filled.iterrows():
+            if bool(filled.at[ri, "_exempt"]):
+                continue
+            code_key = str(row.get("Код") or "").strip()
+            ov = seat_overrides.get(code_key)
+            if not isinstance(ov, dict):
+                continue
+            status = str(ov.get("Статус") or "").strip()
+            if status not in {"✅ Сдал", "⚫ 0%", "❌ Не сдал"}:
+                continue
+            filled.at[ri, "Статус"] = status
+            try:
+                kpi_ov = float(ov.get("KPI") or 0)
+            except Exception:
+                kpi_ov = 0.0
+            if status == "❌ Не сдал":
+                filled.at[ri, "KPI"] = 0.0
+                filled.at[ri, "Категория"] = kpi_category(None)
+                filled.at[ri, "Файл"] = ""
+            elif status == "⚫ 0%":
+                filled.at[ri, "KPI"] = 0.0
+                filled.at[ri, "Категория"] = kpi_category(0.0)
+                if ov.get("Файл"):
+                    filled.at[ri, "Файл"] = str(ov.get("Файл") or "")
+            else:
+                filled.at[ri, "KPI"] = kpi_ov
+                filled.at[ri, "Категория"] = ov.get("Категория") or kpi_category(
+                    kpi_ov if kpi_ov > 0 else None
+                )
+                if ov.get("Файл"):
+                    filled.at[ri, "Файл"] = str(ov.get("Файл") or "")
+            filled.at[ri, "_matched"] = True
 
     filled = filled.drop(columns=["_matched", "_exempt"])
     order = {"✅ Сдал": 0, "⚫ 0%": 1, "❌ Не сдал": 2, "➖ Не обязан": 3}
@@ -799,4 +830,5 @@ def build_filled_staffing_with_reports(
     filled.attrs["seats_filled_all"] = int(len(filled))
     unmatched = [u["name"] for u in uploads if not u["used"] and u["name"]]
     filled.attrs["unmatched_uploads"] = unmatched
+    filled.attrs["seat_overrides"] = dict(seat_overrides or {}) if isinstance(seat_overrides, dict) else {}
     return filled

@@ -294,7 +294,17 @@ PLOTLY_LAYOUT = dict(
 st.markdown('<p class="akela-section-label">Загрузка Excel</p>', unsafe_allow_html=True)
 
 from schedule import active_window_day, now_tashkent, can_upload_for_day
-from shared_store import load_day, publish_day_snapshot, remove_employees_from_day
+from shared_store import (
+    load_day,
+    publish_day_snapshot,
+    remove_employees_from_day,
+    load_staffing_overrides,
+    upsert_seat_override,
+    clear_seat_override,
+    set_staffing_override,
+    clear_staffing_override,
+    admin_upsert_employee,
+)
 
 # Битрикс24-режим сохранён в git — временно только Excel + Google Drive.
 
@@ -399,7 +409,7 @@ if df is None:
     df = pd.DataFrame()
 
 # =========================
-# Удаление ошибочных загрузок (скрыто: ?admin=ТОКЕН из Secrets)
+# Админ-панель (скрыто: ?admin=ТОКЕН из Secrets)
 # =========================
 def _admin_delete_token() -> str:
     try:
@@ -416,45 +426,247 @@ _admin_unlocked = bool(
     and str(st.query_params.get("admin") or "").strip() == _admin_token
 )
 
-if _admin_unlocked and not df.empty and "Сотрудник" in df.columns:
-    with st.expander("Удалить ошибочную запись из отчёта", expanded=True):
-        options = []
-        for _, row in df.iterrows():
-            name = str(row.get("Сотрудник") or "")
-            fname = str(row.get("Файл") or "")
-            kpi = row.get("KPI")
-            label = f"{name} · KPI {kpi}" + (f" · {fname}" if fname else "")
-            options.append((label, name))
-        labels = [o[0] for o in options]
-        picked = st.multiselect(
-            "Выберите записи",
-            labels,
-            placeholder="например ofis-administrator…",
-        )
-        if st.button("Удалить выбранные", type="secondary"):
-            names = [name for label, name in options if label in picked]
-            if not names:
-                st.warning("Ничего не выбрано.")
-            else:
-                try:
-                    with st.spinner("Удаляю из Google Drive…"):
-                        _, meta_del = remove_employees_from_day(names, window_day=selected_day)
-                    st.success(f"Удалено: {meta_del.get('removed', 0)}")
-                    st.rerun()
-                except Exception as exc:
-                    st.error(f"Не удалось удалить: `{exc}`")
+staffing_ov: dict = {}
+try:
+    staffing_ov = load_staffing_overrides()
+except Exception:
+    staffing_ov = {}
 
-staffing = load_staffing()
+seat_ov = shared_meta.get("seat_overrides") or {}
+if not isinstance(seat_ov, dict):
+    seat_ov = {}
+
+staffing = load_staffing(overrides=staffing_ov)
 roster = load_employees_roster()
+# Живая штатка важнее CSV roster, если есть кадровые overrides
+if staffing_ov and not staffing.empty:
+    occ = staffing[staffing["Статус_места"] == "Занято"].copy()
+    if not occ.empty:
+        cols = [c for c in ["ФИО", "Должность", "Пометка"] if c in occ.columns]
+        roster = occ[cols].copy().reset_index(drop=True)
+
 attendance = build_roster_attendance(roster, df if not df.empty else None)
 filled_staff = build_filled_staffing_with_reports(
-    staffing, attendance, submitted=df if not df.empty else None
+    staffing,
+    attendance,
+    submitted=df if not df.empty else None,
+    seat_overrides=seat_ov,
 )
 vacancies = (
     staffing[staffing["Статус_места"] == "Вакансия"].copy()
     if not staffing.empty
     else pd.DataFrame()
 )
+
+if _admin_unlocked:
+    with st.expander("Админ · статусы и штатка", expanded=True):
+        st.caption(
+            f"День {selected_day.strftime('%d.%m.%Y')} · правки в любое время, "
+            "в т.ч. после 20:00. Сохраняется в shared_kpi.json."
+        )
+        tab_status, tab_staff, tab_excel = st.tabs(
+            ["Статусы сдачи", "Штатка", "Excel-записи"]
+        )
+
+        with tab_status:
+            editable = (
+                filled_staff[filled_staff["Статус"] != "➖ Не обязан"].copy()
+                if not filled_staff.empty
+                else pd.DataFrame()
+            )
+            if editable.empty:
+                st.info("Нет мест, по которым можно править статус.")
+            else:
+                seat_labels = []
+                seat_codes = []
+                for _, row in editable.iterrows():
+                    code = str(row.get("Код") or "")
+                    label = (
+                        f"{code} · {row.get('Должность') or ''} · "
+                        f"{row.get('ФИО') or ''} · сейчас: {row.get('Статус') or ''}"
+                    )
+                    seat_labels.append(label)
+                    seat_codes.append(code)
+                pick_label = st.selectbox(
+                    "Место",
+                    seat_labels,
+                    key="admin_status_seat",
+                )
+                pick_idx = seat_labels.index(pick_label) if pick_label in seat_labels else 0
+                pick_code = seat_codes[pick_idx]
+                cur = editable.iloc[pick_idx]
+                has_manual = pick_code in seat_ov
+                if has_manual:
+                    st.caption("На этом месте уже есть ручная правка статуса.")
+
+                new_status = st.selectbox(
+                    "Статус",
+                    ["✅ Сдал", "⚫ 0%", "❌ Не сдал"],
+                    index=["✅ Сдал", "⚫ 0%", "❌ Не сдал"].index(
+                        str(cur.get("Статус") or "❌ Не сдал")
+                    )
+                    if str(cur.get("Статус") or "") in {"✅ Сдал", "⚫ 0%", "❌ Не сдал"}
+                    else 2,
+                    key="admin_status_value",
+                )
+                new_kpi = st.number_input(
+                    "KPI %",
+                    min_value=0.0,
+                    max_value=100.0,
+                    value=float(cur.get("KPI") or 0),
+                    step=1.0,
+                    key="admin_status_kpi",
+                    disabled=new_status != "✅ Сдал",
+                )
+                c1, c2 = st.columns(2)
+                if c1.button("Сохранить статус", type="primary", key="admin_save_status"):
+                    try:
+                        with st.spinner("Сохраняю…"):
+                            upsert_seat_override(
+                                pick_code,
+                                new_status,
+                                kpi=new_kpi if new_status == "✅ Сдал" else 0.0,
+                                window_day=selected_day,
+                            )
+                        st.success("Статус сохранён.")
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"Не удалось сохранить: `{exc}`")
+                if c2.button(
+                    "Сбросить ручную правку",
+                    key="admin_clear_status",
+                    disabled=not has_manual,
+                ):
+                    try:
+                        with st.spinner("Сбрасываю…"):
+                            clear_seat_override(pick_code, window_day=selected_day)
+                        st.success("Ручная правка снята.")
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"Не удалось сбросить: `{exc}`")
+
+        with tab_staff:
+            if staffing.empty:
+                st.info("Штатка пуста.")
+            else:
+                staff_labels = []
+                staff_codes = []
+                for _, row in staffing.iterrows():
+                    code = str(row.get("Код") or "")
+                    mark = " · override" if code in staffing_ov else ""
+                    staff_labels.append(
+                        f"{code} · {row.get('Должность') or ''} · "
+                        f"{row.get('ФИО') or '— вакансия'} · {row.get('Статус_места') or ''}{mark}"
+                    )
+                    staff_codes.append(code)
+                s_label = st.selectbox("Место штатки", staff_labels, key="admin_staff_seat")
+                s_idx = staff_labels.index(s_label) if s_label in staff_labels else 0
+                s_code = staff_codes[s_idx]
+                s_row = staffing.iloc[s_idx]
+                s_fio = str(s_row.get("ФИО") or "")
+                s_status = str(s_row.get("Статус_места") or "")
+                s_note = str(s_row.get("Пометка") or "")
+                if s_code in staffing_ov:
+                    st.caption("Есть кадровая правка поверх staffing.csv.")
+
+                action = st.radio(
+                    "Действие",
+                    ["Уволить (вакансия)", "Заменить / занять", "Сбросить к CSV"],
+                    horizontal=True,
+                    key="admin_staff_action",
+                )
+                new_fio = st.text_input(
+                    "Новое ФИО",
+                    value=s_fio,
+                    key="admin_staff_fio",
+                    disabled=action != "Заменить / занять",
+                )
+                new_note = st.text_input(
+                    "Пометка (например юклатилган)",
+                    value=s_note if action == "Заменить / занять" else "",
+                    key="admin_staff_note",
+                    disabled=action != "Заменить / занять",
+                )
+                if st.button("Применить к штатке", type="primary", key="admin_staff_apply"):
+                    try:
+                        with st.spinner("Сохраняю штатку…"):
+                            if action == "Уволить (вакансия)":
+                                set_staffing_override(
+                                    s_code,
+                                    fio="",
+                                    status="Вакансия",
+                                    note="",
+                                    action="quit",
+                                    prev_fio=s_fio or None,
+                                )
+                            elif action == "Заменить / занять":
+                                set_staffing_override(
+                                    s_code,
+                                    fio=new_fio,
+                                    status="Занято",
+                                    note=new_note,
+                                    action="replace" if s_status == "Занято" else "hire",
+                                    prev_fio=s_fio or None,
+                                )
+                            else:
+                                clear_staffing_override(s_code)
+                        st.success("Штатка обновлена.")
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"Не удалось обновить штатку: `{exc}`")
+
+        with tab_excel:
+            st.caption("Прямые строки Excel-слоя дня (имя из файла отчёта).")
+            if not df.empty and "Сотрудник" in df.columns:
+                options = []
+                for _, row in df.iterrows():
+                    name = str(row.get("Сотрудник") or "")
+                    fname = str(row.get("Файл") or "")
+                    kpi = row.get("KPI")
+                    label = f"{name} · KPI {kpi}" + (f" · {fname}" if fname else "")
+                    options.append((label, name))
+                labels = [o[0] for o in options]
+                picked = st.multiselect(
+                    "Удалить записи",
+                    labels,
+                    placeholder="например ofis-administrator…",
+                    key="admin_excel_del",
+                )
+                if st.button("Удалить выбранные", type="secondary", key="admin_excel_del_btn"):
+                    names = [name for label, name in options if label in picked]
+                    if not names:
+                        st.warning("Ничего не выбрано.")
+                    else:
+                        try:
+                            with st.spinner("Удаляю…"):
+                                _, meta_del = remove_employees_from_day(
+                                    names, window_day=selected_day
+                                )
+                            st.success(f"Удалено: {meta_del.get('removed', 0)}")
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(f"Не удалось удалить: `{exc}`")
+            else:
+                st.caption("За выбранный день Excel-записей нет.")
+
+            with st.form("admin_excel_add"):
+                st.markdown("**Добавить строку вручную**")
+                add_name = st.text_input("Сотрудник / имя из файла")
+                add_kpi = st.number_input("KPI %", min_value=0.0, max_value=100.0, value=0.0)
+                add_file = st.text_input("Файл", value="(admin)")
+                if st.form_submit_button("Добавить", type="primary"):
+                    try:
+                        with st.spinner("Добавляю…"):
+                            admin_upsert_employee(
+                                add_name,
+                                kpi=add_kpi,
+                                file_name=add_file,
+                                window_day=selected_day,
+                            )
+                        st.success("Добавлено.")
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"Не удалось добавить: `{exc}`")
 
 bits = [f"День: {selected_day.strftime('%d.%m.%Y')}"]
 if shared_meta.get("updated_at"):
