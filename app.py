@@ -392,12 +392,21 @@ with nav_l:
         st.session_state.cal_day = None
         st.rerun()
 with nav_c:
-    st.markdown(
-        f"<p style='text-align:center;font-family:Unbounded,sans-serif;"
-        f"font-size:1.1rem;color:#3E4197;margin:0.35rem 0'>"
-        f"{_MONTH_NAMES_RU[st.session_state.cal_month]} {st.session_state.cal_year}</p>",
-        unsafe_allow_html=True,
+    month_label = f"{_MONTH_NAMES_RU[st.session_state.cal_month]} {st.session_state.cal_year}"
+    month_view_active = (
+        st.session_state.cal_week is None and st.session_state.cal_day is None
     )
+    if st.button(
+        month_label,
+        use_container_width=True,
+        key="cal_month_title",
+        type="primary" if month_view_active else "secondary",
+        help="Показать отчёт за весь месяц",
+    ):
+        # клик по названию месяца → месячный вид
+        st.session_state.cal_week = None
+        st.session_state.cal_day = None
+        st.rerun()
 with nav_r:
     if st.button("→", use_container_width=True, key="cal_next"):
         m = st.session_state.cal_month + 1
@@ -415,7 +424,9 @@ month_key = f"{cal_y:04d}-{cal_m:02d}"
 data_days_set = {d for d in available_days if d.year == cal_y and d.month == cal_m}
 
 # Сетка календаря Пн–Вс
-st.caption("Выберите неделю или день. Без выбора дня/недели — месячный отчёт.")
+st.caption(
+    "День → отчёт дня · номер недели слева → неделя · «Август …» сверху → месяц"
+)
 wd_labels = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
 hdr = st.columns(8)
 hdr[0].caption("Нед.")
@@ -424,20 +435,20 @@ for i, lab in enumerate(wd_labels):
 
 for wid, ws, we in weeks_in_month(cal_y, cal_m):
     row = st.columns(8)
-    week_selected = st.session_state.cal_week == wid
-    week_btn_type = "primary" if week_selected else "secondary"
+    # неделя активна, только если выбран этот week и день не выбран
+    week_selected = (
+        st.session_state.cal_week == wid and st.session_state.cal_day is None
+    )
     if row[0].button(
         wid.split("-W")[-1],
         key=f"wk_{wid}",
         use_container_width=True,
-        type=week_btn_type,
-        help=f"{ws.strftime('%d.%m')}–{we.strftime('%d.%m')}",
+        type="primary" if week_selected else "secondary",
+        help=f"Неделя {ws.strftime('%d.%m')}–{we.strftime('%d.%m')}",
     ):
-        if st.session_state.cal_week == wid and st.session_state.cal_day is None:
-            st.session_state.cal_week = None
-        else:
-            st.session_state.cal_week = wid
-            st.session_state.cal_day = None
+        # клик по неделе → недельный вид (без дня)
+        st.session_state.cal_week = wid
+        st.session_state.cal_day = None
         st.rerun()
 
     cur = ws
@@ -454,18 +465,13 @@ for wid, ws, we in weeks_in_month(cal_y, cal_m):
                 key=f"day_{cur.isoformat()}",
                 use_container_width=True,
                 type="primary" if is_sel else "secondary",
+                help=f"День {cur.strftime('%d.%m.%Y')}",
             ):
+                # клик по дню → дневной вид
                 st.session_state.cal_day = cur
                 st.session_state.cal_week = week_id(cur)
                 st.rerun()
         cur += timedelta(days=1)
-
-clr1, clr2 = st.columns([1, 3])
-with clr1:
-    if st.button("Сбросить до месяца", use_container_width=True, key="cal_reset"):
-        st.session_state.cal_week = None
-        st.session_state.cal_day = None
-        st.rerun()
 
 selected_day = st.session_state.cal_day
 selected_week = st.session_state.cal_week
