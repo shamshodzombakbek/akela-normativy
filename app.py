@@ -832,11 +832,20 @@ components.html(
     <script>
     (function () {
       const doc = window.parent.document;
-      // зелёные дни с отчётами: help="report" → aria-label
-      doc.querySelectorAll('.akela-cal-panel button').forEach(function (btn) {
-        const tip = btn.getAttribute('aria-label') || '';
-        if (tip.indexOf('report') >= 0 && btn.getAttribute('kind') !== 'primary'
-            && btn.getAttribute('data-testid') !== 'baseButton-primary') {
+      // компактный вид + зелёные дни (help=report)
+      doc.querySelectorAll('button[data-testid="baseButton-secondary"], button[data-testid="baseButton-primary"]').forEach(function (btn) {
+        const label = (btn.innerText || '').trim();
+        // только одно-/двухзначные числа дней и номера недель
+        if (!/^\d{1,2}$/.test(label)) return;
+        btn.style.minHeight = '28px';
+        btn.style.height = '28px';
+        btn.style.padding = '0';
+        btn.style.fontSize = '12px';
+        btn.style.boxShadow = 'none';
+        const tip = (btn.getAttribute('aria-label') || btn.getAttribute('title') || '');
+        const isPrimary = (btn.getAttribute('data-testid') || '').indexOf('primary') >= 0
+          || (btn.getAttribute('kind') || '') === 'primary';
+        if (!isPrimary && tip.indexOf('report') >= 0) {
           btn.style.background = '#C6F6D5';
           btn.style.border = '1px solid #1F7A4C';
           btn.style.color = '#14532d';
