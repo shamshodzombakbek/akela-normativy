@@ -187,7 +187,53 @@ html, body, [class*="css"] {
 .cal-wrap {
   width: 100%;
   max-width: 360px;
-  margin: 0;
+  margin: 0 auto;
+}
+.cal-center {
+  width: 100%;
+  max-width: 420px;
+  margin: 0 auto;
+}
+.lang-center {
+  text-align: center;
+  margin: 0.4rem auto 0.85rem;
+}
+.lang-row {
+  display: inline-flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: center;
+}
+.lang-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: 2px solid #D5E0EA;
+  text-decoration: none !important;
+  overflow: hidden;
+  background: #fff;
+  box-sizing: border-box;
+  padding: 0;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.lang-btn.active {
+  border-color: #3E4197;
+  box-shadow: 0 0 0 2px rgba(62,65,151,0.25);
+}
+.lang-btn:hover {
+  filter: brightness(0.97);
+}
+.lang-btn svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  /* растягиваем флаг, чтобы круг был заполнен */
+  object-fit: cover;
+  transform: scale(1.35);
 }
 .cal-grid {
   display: grid;
@@ -230,23 +276,6 @@ a.cal-cell:hover { filter: brightness(0.96); color: inherit; }
   font-size: 10px;
   color: #7A8B9C;
   font-weight: 600;
-}
-.lang-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  border: 2px solid #D5E0EA;
-  text-decoration: none;
-  font-size: 20px;
-  margin-left: 6px;
-  background: #fff;
-}
-.lang-btn.active {
-  border-color: #3E4197;
-  box-shadow: 0 0 0 2px rgba(62,65,151,0.25);
 }
 
 
@@ -575,67 +604,78 @@ try:
 except Exception as exc:
     shared_error = str(exc)
 
-# ---- шапка: логотип + язык, ниже календарь (клики через Streamlit-кнопки) ----
-top_logo, top_lang = st.columns([2.2, 1.3])
-with top_logo:
+# ---- шапка: логотип, по центру язык (круглые флаги) и календарь ----
+logo_c, _, _ = st.columns([1.2, 2.0, 1.2])
+with logo_c:
     if LOGO_PATH.exists():
         st.image(str(LOGO_PATH), width=96 if _mobile else 132)
     st.caption(t(lang, "subtitle"))
 
-with top_lang:
-    st.markdown(
-        f'<p class="akela-section-label" style="margin:0 0 0.45rem">{t(lang, "lang")}</p>',
-        unsafe_allow_html=True,
-    )
-    flag_svg = {
-        "uz": (
-            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 200" width="22" height="15">'
-            '<rect width="300" height="200" fill="#1EB53A"/>'
-            '<rect width="300" height="133.33" fill="#FFFFFF"/>'
-            '<rect width="300" height="66.67" fill="#0099B5"/>'
-            '<rect y="60" width="300" height="6.67" fill="#CE1126"/>'
-            '<rect y="133.33" width="300" height="6.67" fill="#CE1126"/>'
-            '<circle cx="48" cy="33" r="18" fill="#fff"/>'
-            '<circle cx="55" cy="33" r="14" fill="#0099B5"/>'
-            "</svg>"
-        ),
-        "ru": (
-            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 9 6" width="22" height="15">'
-            '<rect fill="#fff" width="9" height="6"/>'
-            '<rect fill="#0039A6" y="2" width="9" height="4"/>'
-            '<rect fill="#D52B1E" y="4" width="9" height="2"/>'
-            "</svg>"
-        ),
-        "en": (
-            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 30" width="22" height="15">'
-            '<rect width="60" height="30" fill="#012169"/>'
-            '<path d="M0,0 L60,30 M60,0 L0,30" stroke="#fff" stroke-width="6"/>'
-            '<path d="M0,0 L60,30 M60,0 L0,30" stroke="#C8102E" stroke-width="3"/>'
-            '<path d="M30,0 v30 M0,15 h60" stroke="#fff" stroke-width="10"/>'
-            '<path d="M30,0 v30 M0,15 h60" stroke="#C8102E" stroke-width="6"/>'
-            "</svg>"
-        ),
-    }
-    lang_cols = st.columns(3)
-    for i, code in enumerate(("uz", "ru", "en")):
-        with lang_cols[i]:
-            st.markdown(
-                f'<div style="text-align:center;line-height:0;margin-bottom:4px">{flag_svg[code]}</div>',
-                unsafe_allow_html=True,
-            )
-            if st.button(
-                code.upper(),
-                key=f"lang_{code}",
-                use_container_width=True,
-                type="primary" if lang == code else "secondary",
-            ):
-                if code != lang:
-                    st.session_state.lang = code
-                    st.query_params["lang"] = code
-                    st.rerun()
 
+def _lang_href(code: str) -> str:
+    params: dict[str, str] = {"lang": code}
+    if _admin_unlocked and _admin_token:
+        params["admin"] = _admin_token
+    # сохраняем текущий вид календаря
+    if st.session_state.get("cal_day") is not None:
+        params["cal_day"] = st.session_state.cal_day.isoformat()
+    elif st.session_state.get("cal_week"):
+        params["cal_week"] = st.session_state.cal_week
+    else:
+        params["cal_view"] = "month"
+    return "?" + urlencode(params)
+
+
+# круглые SVG-флаги по центру — клик по флагу, без кнопок снизу
+flag_svg_full = {
+    "uz": (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 200" preserveAspectRatio="xMidYMid slice">'
+        '<rect width="300" height="200" fill="#1EB53A"/>'
+        '<rect width="300" height="133.33" fill="#FFFFFF"/>'
+        '<rect width="300" height="66.67" fill="#0099B5"/>'
+        '<rect y="60" width="300" height="6.67" fill="#CE1126"/>'
+        '<rect y="133.33" width="300" height="6.67" fill="#CE1126"/>'
+        '<circle cx="48" cy="33" r="18" fill="#fff"/>'
+        '<circle cx="55" cy="33" r="14" fill="#0099B5"/>'
+        "</svg>"
+    ),
+    "ru": (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 9 6" preserveAspectRatio="xMidYMid slice">'
+        '<rect fill="#fff" width="9" height="6"/>'
+        '<rect fill="#0039A6" y="2" width="9" height="4"/>'
+        '<rect fill="#D52B1E" y="4" width="9" height="2"/>'
+        "</svg>"
+    ),
+    "en": (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 30" preserveAspectRatio="xMidYMid slice">'
+        '<rect width="60" height="30" fill="#012169"/>'
+        '<path d="M0,0 L60,30 M60,0 L0,30" stroke="#fff" stroke-width="6"/>'
+        '<path d="M0,0 L60,30 M60,0 L0,30" stroke="#C8102E" stroke-width="3"/>'
+        '<path d="M30,0 v30 M0,15 h60" stroke="#fff" stroke-width="10"/>'
+        '<path d="M30,0 v30 M0,15 h60" stroke="#C8102E" stroke-width="6"/>'
+        "</svg>"
+    ),
+}
+flag_btns = []
+for code in ("uz", "ru", "en"):
+    active = " active" if lang == code else ""
+    flag_btns.append(
+        f'<a class="lang-btn{active}" href="{_lang_href(code)}" target="_self" '
+        f'title="{code.upper()}">{flag_svg_full[code]}</a>'
+    )
 st.markdown(
-    f'<p class="akela-section-label" style="margin:0.35rem 0 0.35rem">{t(lang, "calendar")}</p>',
+    f'<div class="lang-center">'
+    f'<p class="akela-section-label" style="margin:0 0 0.55rem">{t(lang, "lang")}</p>'
+    f'<div class="lang-row">{"".join(flag_btns)}</div>'
+    f"</div>",
+    unsafe_allow_html=True,
+)
+
+# календарь по центру
+st.markdown('<div class="cal-center">', unsafe_allow_html=True)
+st.markdown(
+    f'<p class="akela-section-label" style="margin:0.15rem 0 0.45rem;text-align:center">'
+    f'{t(lang, "calendar")}</p>',
     unsafe_allow_html=True,
 )
 nav_l, nav_c, nav_r = st.columns([1, 4, 1])
@@ -737,28 +777,33 @@ st.markdown(
     + "</div></div>",
     unsafe_allow_html=True,
 )
-# форсируем переход в том же окне (Streamlit иногда открывает <a> в новой вкладке)
+# клики по флагам и дням — всегда в том же окне
 components.html(
     """
     <script>
     (function () {
       const doc = window.parent.document;
-      doc.querySelectorAll('a.cal-cell').forEach(function (a) {
-        a.addEventListener('click', function (e) {
-          e.preventDefault();
-          e.stopPropagation();
-          const href = a.getAttribute('href') || '';
-          if (!href) return;
-          const u = new URL(href, window.parent.location.href);
-          window.parent.location.href = u.toString();
-        }, true);
-      });
+      function wire(sel) {
+        doc.querySelectorAll(sel).forEach(function (a) {
+          a.addEventListener('click', function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+            const href = a.getAttribute('href') || '';
+            if (!href) return;
+            const u = new URL(href, window.parent.location.href);
+            window.parent.location.href = u.toString();
+          }, true);
+        });
+      }
+      wire('a.cal-cell');
+      wire('a.lang-btn');
     })();
     </script>
     """,
     height=0,
 )
 st.caption(t(lang, "cal_hint"))
+st.markdown("</div>", unsafe_allow_html=True)
 
 cal_y, cal_m = st.session_state.cal_year, st.session_state.cal_month
 month_key = f"{cal_y:04d}-{cal_m:02d}"
