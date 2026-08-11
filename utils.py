@@ -475,12 +475,13 @@ def _match_score(upload_name: str, fio: str, role: str) -> float:
         return 0.0
 
     score = 0.0
+    # Полное совпадение ФИО — сразу; роль сверяем с линейками (не early-return без delta)
     if u == f or u_lat == f_lat or u_fuzzy == f_fuzzy:
         return 100.0
     if r and (u == r or u_lat == r_lat):
-        return 92.0
+        score = 92.0
     if u_role and r_role and u_role == r_role:
-        return 95.0
+        score = max(score, 95.0)
 
     # Имя / фамилия: латиница ↔ кириллица
     u_name_toks = _latin_tokens(upload_name)
@@ -552,7 +553,109 @@ def _match_score(upload_name: str, fio: str, role: str) -> float:
     if u_core and r_core and (u_core & r_core):
         score = max(score, 70.0 + 20.0 * (len(u_core & r_core) / max(len(r_core), 1)))
 
+    # Проект / продукт / линейка PRINT·PLAST·METAL — не смешивать
+    score += _sales_line_delta(upload_name, role)
+
     return score
+
+
+def _sales_line_delta(upload_name: str | None, role: str | None) -> float:
+    """
+    Штраф/бонус, чтобы «проектных PRINT & PACK» не считался
+    за «продуктных PRINT & PACK» и наоборот.
+    """
+    u = _latin_fuzzy(upload_name)
+    r = _latin_fuzzy(role)
+    u_cyr = _normalize_person_text(upload_name)
+    r_cyr = _normalize_person_text(role)
+    blob_u = f"{u} {u_cyr}"
+    blob_r = f"{r} {r_cyr}"
+
+    def has(*words: str) -> tuple[bool, bool]:
+        return (any(w in blob_u for w in words), any(w in blob_r for w in words))
+
+    delta = 0.0
+    u_proj, r_proj = has("proekt", "project", "проект")
+    u_prod, r_prod = has("produkt", "product", "продукт")
+    if u_proj and r_prod and not r_proj:
+        delta -= 40.0
+    if u_prod and r_proj and not r_prod:
+        delta -= 40.0
+    if u_proj and r_proj:
+        delta += 18.0
+    if u_prod and r_prod:
+        delta += 18.0
+
+    # PRINT & PACK vs PLAST & PACK vs METALWORK / WOODWORK
+    def line_id(blob: str) -> str | None:
+        if "print" in blob and "pack" in blob:
+            return "print_pack"
+        if "plast" in blob and "pack" in blob:
+            return "plast_pack"
+        if "metalwork" in blob or ("metal" in blob and "work" in blob):
+            return "metalwork"
+        if "woodwork" in blob or ("wood" in blob and "work" in blob):
+            return "woodwork"
+        if "metal" in blob and "pack" not in blob and "print" not in blob:
+            return "metalwork"
+        return None
+
+    lu, lr = line_id(blob_u), line_id(blob_r)
+    if lu and lr:
+        if lu == lr:
+            delta += 28.0
+        else:
+            delta -= 55.0
+    elif lu and not lr:
+        # в файле указана линейка — место без той же линейки не берём
+        delta -= 70.0
+
+    u_buy, r_buy = has("zakup", "xarid", "закуп", " заку", "procurement", "purchas")
+    u_sale, r_sale = has(
+        "sotuv",
+        "sales",
+        "продаж",
+        "продажа",
+        "prodazh",
+        "prodaj",
+        "sotish",
+        "sale",
+    )
+    if u_sale and r_buy and not r_sale:
+        delta -= 100.0
+    if u_buy and r_sale and not r_buy:
+        delta -= 100.0
+    if u_sale and not r_sale and not r_buy:
+        # «создание продукта» ≠ продажи
+        delta -= 45.0
+    if u_buy and not r_buy:
+        delta -= 45.0
+    if (u_sale and r_sale) or (u_buy and r_buy):
+        delta += 12.0
+
+    # Менеджер ≠ начальник отдела
+    u_mgr, r_mgr = has("menejer", "manager", "менеджер")
+    u_boss, r_boss = has("nachalnik", "nachal", "начальник", "boshliq", "head of")
+    if u_mgr and not u_boss and r_boss:
+        delta -= 120.0
+    if u_boss and not u_mgr and r_mgr and not r_boss:
+        delta -= 120.0
+    if u_mgr and r_mgr and not r_boss:
+        delta += 16.0
+
+    # чужая линейка / общий «проектный» без той же линейки — не цеплять
+    if lu and lr and lu != lr:
+        delta -= 20.0
+    if u_proj and r_proj and lu and not lr:
+        delta -= 30.0
+    if u_prod and r_prod and lu and not lr:
+        delta -= 30.0
+
+    # Проектный ≠ продуктный всегда жёстко (один файл ≠ два места)
+    if (u_proj and r_prod and not r_proj) or (u_prod and r_proj and not r_prod):
+        delta -= 90.0
+
+    return delta
 
 
 def build_roster_attendance(
@@ -610,15 +713,16 @@ def build_roster_attendance(
         )
 
     # жадно: сначала самые уверенные пары
-    pairs: list[tuple[float, int, int]] = []
+    pairs: list[tuple[float, int, int, int]] = []
     for ui, up in enumerate(uploads):
         for ri, row in base.iterrows():
             sc = _match_score(up["name"], str(row["ФИО"]), str(row["Должность"]))
             if sc >= min_score:
-                pairs.append((sc, ui, int(ri)))
-    pairs.sort(key=lambda x: x[0], reverse=True)
+                yuk = 1 if str(row.get("Пометка") or "").casefold() == "юклатилган" else 0
+                pairs.append((sc, -yuk, ui, int(ri)))
+    pairs.sort(key=lambda x: (x[0], x[1]), reverse=True)
 
-    for sc, ui, ri in pairs:
+    for sc, _yuk, ui, ri in pairs:
         if uploads[ui]["used"] or bool(base.at[ri, "_matched"]):
             continue
         up = uploads[ui]
@@ -716,17 +820,20 @@ def build_filled_staffing_with_reports(
                 }
             )
 
-    pairs: list[tuple[float, int, int]] = []
+    pairs: list[tuple[float, int, int, int]] = []
     for ui, up in enumerate(uploads):
         for ri, row in filled.iterrows():
             if bool(filled.at[ri, "_exempt"]):
                 continue
             sc = _match_score(up["name"], str(row.get("ФИО") or ""), str(row.get("Должность") or ""))
             if sc >= min_score:
-                pairs.append((sc, ui, int(ri)))
-    pairs.sort(key=lambda x: x[0], reverse=True)
+                # юклатилган ниже приоритетом при равном score
+                yuk = 1 if str(row.get("Пометка") or "").casefold() == "юклатилган" else 0
+                pairs.append((sc, -yuk, ui, int(ri)))
+    # выше score, без юклатилган раньше
+    pairs.sort(key=lambda x: (x[0], x[1]), reverse=True)
 
-    for sc, ui, ri in pairs:
+    for sc, _yuk, ui, ri in pairs:
         if uploads[ui]["used"] or bool(filled.at[ri, "_matched"]):
             continue
         up = uploads[ui]
@@ -738,45 +845,8 @@ def build_filled_staffing_with_reports(
         filled.at[ri, "Категория"] = kpi_category(kpi if kpi > 0 else None)
         filled.at[ri, "Файл"] = up["file"]
 
-    if attendance is not None and not attendance.empty:
-        for _, row in attendance.iterrows():
-            if str(row.get("Статус") or "") == "❌ Не сдал":
-                continue
-            fio_key = _normalize_person_text(str(row.get("ФИО") or ""))
-            lat = _to_latin_fold(str(row.get("ФИО") or ""))
-            role = str(row.get("Должность") or "")
-            payload_status = row.get("Статус") or "✅ Сдал"
-            payload_kpi = float(row.get("KPI") or 0)
-            payload_cat = row.get("Категория") or kpi_category(
-                payload_kpi if payload_kpi > 0 else None
-            )
-            payload_file = row.get("Файл") or ""
-            best_ri, best_sc = None, -1.0
-            for ri, seat in filled.iterrows():
-                if bool(filled.at[ri, "_matched"]) or bool(filled.at[ri, "_exempt"]):
-                    continue
-                seat_key = _normalize_person_text(str(seat.get("ФИО") or ""))
-                seat_lat = _to_latin_fold(str(seat.get("ФИО") or ""))
-                sc = 0.0
-                if fio_key and seat_key == fio_key:
-                    sc = 100.0
-                elif lat and seat_lat == lat:
-                    sc = 95.0
-                else:
-                    continue
-                sc += min(
-                    20.0,
-                    _match_score(role, str(seat.get("ФИО") or ""), str(seat.get("Должность") or ""))
-                    * 0.1,
-                )
-                if sc > best_sc:
-                    best_sc, best_ri = sc, int(ri)
-            if best_ri is not None:
-                filled.at[best_ri, "_matched"] = True
-                filled.at[best_ri, "Статус"] = payload_status
-                filled.at[best_ri, "KPI"] = payload_kpi
-                filled.at[best_ri, "Категория"] = payload_cat
-                filled.at[best_ri, "Файл"] = payload_file
+    # НЕ переносим сдачу с одной должности человека на другую
+    # (проект PRINT ≠ продукт PRINT; юклатилган отдельно)
 
     # Ручные статусы админа по Код — поверх матчинга (кроме «Не обязан»)
     if seat_overrides and isinstance(seat_overrides, dict) and "Код" in filled.columns:
