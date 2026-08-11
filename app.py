@@ -289,6 +289,14 @@ div[data-testid="stPlotlyChart"] {
   border-radius: 2px;
   padding: 0.4rem;
   animation: fadeup 0.6s 0.1s ease-out both;
+  transition: transform 0.28s ease, box-shadow 0.28s ease;
+  transform-origin: center center;
+}
+div[data-testid="stPlotlyChart"]:hover {
+  transform: scale(1.05);
+  box-shadow: 0 14px 36px rgba(26, 35, 50, 0.16);
+  z-index: 30;
+  position: relative;
 }
 
 .stAlert {
@@ -1288,7 +1296,11 @@ def _plotly_selection_points(event) -> list:
 
 
 def _plotly_chart_select(fig, *, key: str):
-    kwargs = dict(use_container_width=True, key=key)
+    kwargs = dict(
+        use_container_width=True,
+        key=key,
+        config={"displayModeBar": False, "scrollZoom": False},
+    )
     try:
         return st.plotly_chart(
             fig, on_select="rerun", selection_mode="points", **kwargs
@@ -1297,7 +1309,24 @@ def _plotly_chart_select(fig, *, key: str):
         return st.plotly_chart(fig, **kwargs)
 
 
-st.caption(t(lang, "drill_hint"))
+def _scroll_to_drill():
+    components.html(
+        """
+        <script>
+        (function () {
+          const doc = window.parent.document;
+          const el = doc.getElementById("akela-drill-anchor");
+          if (el) {
+            setTimeout(function () {
+              el.scrollIntoView({ behavior: "smooth", block: "start" });
+            }, 120);
+          }
+        })();
+        </script>
+        """,
+        height=0,
+    )
+
 
 with col1:
     pie = px.pie(
@@ -1314,7 +1343,9 @@ with col1:
         textinfo="percent+label",
         textfont_size=12,
         textfont_color="#1A2332",
-        pull=[0.02] * len(submit_stats),
+        pull=[0.035] * max(len(submit_stats), 1),
+        hovertemplate="<b>%{label}</b><br>%{percent}<br>%{value}<extra></extra>",
+        hoverlabel=dict(bgcolor="#ffffff", font_size=15, font_color="#1A2332"),
     )
     _pie_layout = {k: v for k, v in PLOTLY_LAYOUT.items() if k not in {"margin", "title"}}
     pie.update_layout(
@@ -1322,6 +1353,7 @@ with col1:
         showlegend=True,
         legend=dict(orientation="h", y=-0.12),
         margin=dict(l=16, r=16, t=48, b=48),
+        hovermode="closest",
     )
     ev_submit = _plotly_chart_select(pie, key="pie_submit_click")
 
@@ -1345,17 +1377,20 @@ with col2:
         textinfo="percent+label",
         textfont_size=12,
         textfont_color="#1A2332",
-        pull=[0.02] * len(stats),
+        pull=[0.035] * max(len(stats), 1),
+        hovertemplate="<b>%{label}</b><br>%{percent}<br>%{value}<extra></extra>",
+        hoverlabel=dict(bgcolor="#ffffff", font_size=15, font_color="#1A2332"),
     )
     pie2.update_layout(
         **_pie_layout,
         showlegend=True,
         legend=dict(orientation="h", y=-0.12),
         margin=dict(l=16, r=16, t=48, b=56),
+        hovermode="closest",
     )
     ev_cats = _plotly_chart_select(pie2, key="pie_cats_click")
 
-# ---- разбор клика по диаграмме → список мест ----
+# ---- клик по сегменту → список мест + прокрутка вниз ----
 drill_kind = None  # "ok" | "bad" | category label
 for pt in _plotly_selection_points(ev_submit):
     lab = str(pt.get("label") or pt.get("name") or "").strip()
@@ -1372,26 +1407,18 @@ if drill_kind is None:
             drill_kind = lab
             break
 
-# запасной UX: кнопки сегментов (если клик по pie не сработал)
-fb1, fb2, fb3 = st.columns([1, 1, 1.2])
-with fb1:
-    if st.button(ok_label, key="drill_btn_ok", use_container_width=True):
-        st.session_state.chart_drill = "ok"
-        st.rerun()
-with fb2:
-    if st.button(submit_label, key="drill_btn_bad", use_container_width=True):
-        st.session_state.chart_drill = "bad"
-        st.rerun()
-with fb3:
-    if st.button(t(lang, "drill_clear"), key="drill_btn_clear", use_container_width=True):
-        st.session_state.chart_drill = None
-        st.rerun()
-
 if drill_kind is not None:
     st.session_state.chart_drill = drill_kind
 drill = st.session_state.get("chart_drill")
 
+st.markdown(
+    '<div id="akela-drill-anchor" style="height:1px;scroll-margin-top:1rem;"></div>',
+    unsafe_allow_html=True,
+)
+
+showed_drill = False
 if drill and not filled_staff.empty:
+    showed_drill = True
     st.markdown(
         f'<p class="akela-section-label">{t(lang, "drill_seats")}</p>',
         unsafe_allow_html=True,
@@ -1402,7 +1429,6 @@ if drill and not filled_staff.empty:
     elif drill == "bad":
         drill_view = drill_view[drill_view["Статус"] == "❌ Не сдал"]
     else:
-        # категория KPI
         if "Категория" not in drill_view.columns:
             drill_view["Категория"] = drill_view["KPI"].map(
                 lambda x: kpi_category(float(x) if x is not None and str(x) != "" else None)
@@ -1416,6 +1442,7 @@ if drill and not filled_staff.empty:
     st.caption(f"{drill} · {len(drill_view)}")
     st.dataframe(drill_view[show_d], use_container_width=True, hide_index=True)
 elif drill and has_uploads and not chart_df.empty:
+    showed_drill = True
     st.markdown(
         f'<p class="akela-section-label">{t(lang, "drill_seats")}</p>',
         unsafe_allow_html=True,
@@ -1429,6 +1456,9 @@ elif drill and has_uploads and not chart_df.empty:
     show_d = [c for c in ["Сотрудник", "KPI", "Категория", "Файл"] if c in drill_view.columns]
     st.caption(f"{drill} · {len(drill_view)}")
     st.dataframe(drill_view[show_d], use_container_width=True, hide_index=True)
+
+if showed_drill and drill_kind is not None:
+    _scroll_to_drill()
 
 if not has_uploads:
     if _admin_unlocked:
