@@ -319,19 +319,64 @@ div[role="radiogroup"] label:hover {
 .stButton > button {
   font-family: "Onest", sans-serif !important;
   font-weight: 600 !important;
-  border-radius: 2px !important;
+  border-radius: 4px !important;
+  letter-spacing: 0.02em;
+  transition: transform 0.15s ease, box-shadow 0.2s ease !important;
+}
+
+button[data-testid="baseButton-primary"],
+.stButton > button[kind="primary"] {
   border: none !important;
   background: linear-gradient(135deg, var(--teal) 0%, var(--teal-deep) 100%) !important;
   color: #fff !important;
   padding: 0.55rem 1.25rem !important;
-  letter-spacing: 0.02em;
-  transition: transform 0.15s ease, box-shadow 0.2s ease !important;
   box-shadow: 0 8px 20px rgba(62, 65, 151, 0.22);
 }
 
-.stButton > button:hover {
+button[data-testid="baseButton-primary"]:hover,
+.stButton > button[kind="primary"]:hover {
   transform: translateY(-1px);
   box-shadow: 0 12px 28px rgba(62, 65, 151, 0.3) !important;
+}
+
+button[data-testid="baseButton-secondary"],
+.stButton > button[kind="secondary"] {
+  border: 1px solid #D5E0EA !important;
+  background: #EEF2F6 !important;
+  color: #1A2332 !important;
+  box-shadow: none !important;
+  padding: 0.45rem 0.8rem !important;
+}
+
+/* компактные ячейки календаря */
+div.akela-cal-grid button[data-testid="baseButton-secondary"],
+div.akela-cal-grid button[data-testid="baseButton-primary"],
+div.akela-cal-grid .stButton > button {
+  min-height: 2.1rem !important;
+  height: 2.1rem !important;
+  padding: 0 !important;
+  font-size: 0.8rem !important;
+  border-radius: 4px !important;
+  box-shadow: none !important;
+}
+div.akela-cal-grid button[data-testid="baseButton-secondary"] {
+  background: #EEF2F6 !important;
+}
+/* дни с отчётами — зелёный фон через data- атрибут не доступен;
+   зелёная точка в подписи кнопки */
+@media (max-width: 768px) {
+  div.akela-cal-grid button[data-testid="baseButton-secondary"],
+  div.akela-cal-grid button[data-testid="baseButton-primary"],
+  div.akela-cal-grid .stButton > button {
+    min-height: 2.55rem !important;
+    height: 2.55rem !important;
+    font-size: 0.85rem !important;
+  }
+  .stButton > button {
+    padding: 0.5rem 0.7rem !important;
+    box-shadow: none !important;
+    min-height: 2.5rem !important;
+  }
 }
 
 hr {
@@ -519,7 +564,7 @@ try:
 except Exception as exc:
     shared_error = str(exc)
 
-# ---- шапка: логотип + язык, ниже календарь на всю ширину (удобно на телефоне) ----
+# ---- шапка: логотип + язык, ниже календарь (клики через Streamlit-кнопки) ----
 top_logo, top_lang = st.columns([2.2, 1.3])
 with top_logo:
     if LOGO_PATH.exists():
@@ -531,10 +576,9 @@ with top_lang:
         f'<p class="akela-section-label" style="margin:0 0 0.45rem">{t(lang, "lang")}</p>',
         unsafe_allow_html=True,
     )
-    # SVG-флаги (не emoji) — одинаково на Windows / Mac / Linux / телефоне
     flag_svg = {
         "uz": (
-            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 200" width="28" height="20">'
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 200" width="22" height="15">'
             '<rect width="300" height="200" fill="#1EB53A"/>'
             '<rect width="300" height="133.33" fill="#FFFFFF"/>'
             '<rect width="300" height="66.67" fill="#0099B5"/>'
@@ -542,83 +586,43 @@ with top_lang:
             '<rect y="133.33" width="300" height="6.67" fill="#CE1126"/>'
             '<circle cx="48" cy="33" r="18" fill="#fff"/>'
             '<circle cx="55" cy="33" r="14" fill="#0099B5"/>'
-            '<g fill="#fff">'
-            '<circle cx="78" cy="16" r="2.2"/><circle cx="88" cy="22" r="2.2"/>'
-            '<circle cx="98" cy="16" r="2.2"/><circle cx="88" cy="32" r="2.2"/>'
-            '<circle cx="98" cy="28" r="2.2"/><circle cx="108" cy="22" r="2.2"/>'
-            '<circle cx="78" cy="38" r="2.2"/><circle cx="88" cy="44" r="2.2"/>'
-            '<circle cx="98" cy="40" r="2.2"/><circle cx="108" cy="34" r="2.2"/>'
-            '<circle cx="118" cy="28" r="2.2"/><circle cx="108" cy="46" r="2.2"/>'
-            '</g></svg>'
+            "</svg>"
         ),
         "ru": (
-            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 9 6" width="28" height="20">'
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 9 6" width="22" height="15">'
             '<rect fill="#fff" width="9" height="6"/>'
             '<rect fill="#0039A6" y="2" width="9" height="4"/>'
             '<rect fill="#D52B1E" y="4" width="9" height="2"/>'
             "</svg>"
         ),
         "en": (
-            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 30" width="28" height="20">'
-            '<clipPath id="s"><path d="M0,0 v30 h60 v-30 z"/></clipPath>'
-            '<clipPath id="t"><path d="M30,15 h30 v15 z v15 h-30 z h-30 v-15 z v-15 h30 z"/></clipPath>'
-            '<g clip-path="url(#s)">'
-            '<path d="M0,0 v30 h60 v-30 z" fill="#012169"/>'
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 30" width="22" height="15">'
+            '<rect width="60" height="30" fill="#012169"/>'
             '<path d="M0,0 L60,30 M60,0 L0,30" stroke="#fff" stroke-width="6"/>'
-            '<path d="M0,0 L60,30 M60,0 L0,30" clip-path="url(#t)" stroke="#C8102E" stroke-width="4"/>'
+            '<path d="M0,0 L60,30 M60,0 L0,30" stroke="#C8102E" stroke-width="3"/>'
             '<path d="M30,0 v30 M0,15 h60" stroke="#fff" stroke-width="10"/>'
             '<path d="M30,0 v30 M0,15 h60" stroke="#C8102E" stroke-width="6"/>'
-            "</g></svg>"
+            "</svg>"
         ),
     }
-    admin_lang_js = (
-        f'u.searchParams.set("admin", "{_admin_token}");'
-        if _admin_unlocked and _admin_token
-        else ""
-    )
-    btns = []
-    for code in ("uz", "ru", "en"):
-        active = " active" if lang == code else ""
-        btns.append(
-            f'<button type="button" class="lang-btn{active}" title="{code.upper()}" '
-            f"onclick=\"setLang('{code}')\">{flag_svg[code]}</button>"
-        )
-    lang_html = f"""
-<!DOCTYPE html>
-<html><head><meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1"/>
-<style>
-  html, body {{ margin: 0; padding: 0; background: transparent; }}
-  .lang-row {{ display: flex; gap: 8px; align-items: center; justify-content: flex-end; flex-wrap: wrap; }}
-  .lang-btn {{
-    width: 44px; height: 44px; border-radius: 50%;
-    border: 2px solid #D5E0EA; background: #fff;
-    padding: 0; cursor: pointer;
-    display: inline-flex; align-items: center; justify-content: center;
-    overflow: hidden; box-sizing: border-box;
-    -webkit-tap-highlight-color: transparent;
-  }}
-  .lang-btn.active {{
-    border-color: #3E4197;
-    box-shadow: 0 0 0 2px rgba(62,65,151,0.25);
-  }}
-  .lang-btn:hover {{ filter: brightness(0.97); }}
-  .lang-btn svg {{ display: block; border-radius: 2px; }}
-</style></head><body>
-<script>
-function setLang(code) {{
-  const u = new URL(window.parent.location.href);
-  u.searchParams.set("lang", code);
-  {admin_lang_js}
-  window.parent.location.href = u.toString();
-}}
-</script>
-<div class="lang-row">{"".join(btns)}</div>
-</body></html>
-"""
-    components.html(lang_html, height=56, scrolling=False)
+    lang_cols = st.columns(3)
+    for i, code in enumerate(("uz", "ru", "en")):
+        with lang_cols[i]:
+            st.markdown(
+                f'<div style="text-align:center;line-height:0;margin-bottom:4px">{flag_svg[code]}</div>',
+                unsafe_allow_html=True,
+            )
+            if st.button(
+                code.upper(),
+                key=f"lang_{code}",
+                use_container_width=True,
+                type="primary" if lang == code else "secondary",
+            ):
+                if code != lang:
+                    st.session_state.lang = code
+                    st.query_params["lang"] = code
+                    st.rerun()
 
-# календарь — отдельный полный ряд
 st.markdown(
     f'<p class="akela-section-label" style="margin:0.35rem 0 0.35rem">{t(lang, "calendar")}</p>',
     unsafe_allow_html=True,
@@ -634,6 +638,9 @@ with nav_l:
         st.session_state.cal_year = y
         st.session_state.cal_week = None
         st.session_state.cal_day = None
+        for k in ("cal_day", "cal_week", "cal_view"):
+            if k in st.query_params:
+                del st.query_params[k]
         st.rerun()
 with nav_c:
     month_label = f"{month_name(lang, st.session_state.cal_month)} {st.session_state.cal_year}"
@@ -662,6 +669,9 @@ with nav_r:
         st.session_state.cal_year = y
         st.session_state.cal_week = None
         st.session_state.cal_day = None
+        for k in ("cal_day", "cal_week", "cal_view"):
+            if k in st.query_params:
+                del st.query_params[k]
         st.rerun()
 
 cal_y, cal_m = st.session_state.cal_year, st.session_state.cal_month
@@ -669,140 +679,60 @@ month_key = f"{cal_y:04d}-{cal_m:02d}"
 data_days_set = {d for d in available_days if d.year == cal_y and d.month == cal_m}
 
 wd = weekday_labels(lang)
-admin_js = (
-    f'u.searchParams.set("admin", "{_admin_token}");'
-    if _admin_unlocked and _admin_token
-    else 'u.searchParams.delete("admin");'
-)
-cells: list[str] = []
-cells.append(f'<div class="cal-head">{t(lang, "week_col")}</div>')
-for lab in wd:
-    cells.append(f'<div class="cal-head">{lab}</div>')
+head = st.columns([0.85] + [1] * 7)
+head[0].caption(t(lang, "week_col"))
+for i, lab in enumerate(wd):
+    head[i + 1].caption(lab)
 
-n_weeks = 0
 for wid, ws, we in weeks_in_month(cal_y, cal_m):
-    n_weeks += 1
+    row = st.columns([0.85] + [1] * 7)
     week_sel = st.session_state.cal_week == wid and st.session_state.cal_day is None
-    wcls = "cal-cell selected" if week_sel else "cal-cell"
-    cells.append(
-        f'<button type="button" class="{wcls}" '
-        f'title="{ws.strftime("%d.%m")}–{we.strftime("%d.%m")}" '
-        f"onclick=\"pickWeek('{wid}')\">{wid.split('-W')[-1]}</button>"
-    )
+    with row[0]:
+        if st.button(
+            wid.split("-W")[-1],
+            key=f"cal_w_{wid}",
+            use_container_width=True,
+            type="primary" if week_sel else "secondary",
+            help=f"{ws.strftime('%d.%m')}–{we.strftime('%d.%m')}",
+        ):
+            st.session_state.cal_week = wid
+            st.session_state.cal_day = None
+            for k in ("cal_day", "cal_week", "cal_view"):
+                if k in st.query_params:
+                    del st.query_params[k]
+            st.rerun()
     cur = ws
-    for _ in range(7):
+    for di in range(7):
         in_month = cur.month == cal_m and cur.year == cal_y
-        if not in_month:
-            cells.append('<div class="cal-cell muted">·</div>')
-        else:
-            has_data = cur in data_days_set
-            is_sel = st.session_state.cal_day == cur
-            cls = "cal-cell"
-            if has_data:
-                cls += " has-data"
-            if is_sel:
-                cls += " selected"
-            iso = cur.isoformat()
-            cells.append(
-                f'<button type="button" class="{cls}" '
-                f"onclick=\"pickDay('{iso}')\">{cur.day}</button>"
-            )
+        with row[di + 1]:
+            if not in_month:
+                st.button(
+                    " ",
+                    key=f"cal_pad_{wid}_{di}",
+                    use_container_width=True,
+                    disabled=True,
+                )
+            else:
+                has_data = cur in data_days_set
+                is_sel = st.session_state.cal_day == cur
+                label = f"{cur.day}" if not has_data else f"●{cur.day}"
+                if st.button(
+                    label,
+                    key=f"cal_d_{cur.isoformat()}",
+                    use_container_width=True,
+                    type="primary" if is_sel else "secondary",
+                    help=("есть отчёт" if has_data else None),
+                ):
+                    st.session_state.cal_day = cur
+                    st.session_state.cal_week = week_id(cur)
+                    st.session_state.cal_year = cur.year
+                    st.session_state.cal_month = cur.month
+                    for k in ("cal_day", "cal_week", "cal_view"):
+                        if k in st.query_params:
+                            del st.query_params[k]
+                    st.rerun()
         cur += timedelta(days=1)
 
-cal_cell_h = 34 if _mobile else 28
-cal_html = f"""
-<!DOCTYPE html>
-<html><head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1"/>
-<style>
-  html, body {{ margin: 0; padding: 0; background: transparent; font-family: Onest, sans-serif; }}
-  .cal-wrap {{ width: 100%; max-width: 440px; margin: 0 auto; }}
-  .cal-grid {{
-    display: grid;
-    grid-template-columns: minmax(28px, 36px) repeat(7, 1fr);
-    gap: 3px;
-    font-size: 12px;
-  }}
-  .cal-cell {{
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    height: {cal_cell_h}px;
-    min-height: {cal_cell_h}px;
-    border-radius: 4px;
-    color: #1A2332;
-    background: #EEF2F6;
-    border: 1px solid transparent;
-    font-weight: 600;
-    cursor: pointer;
-    padding: 0;
-    font-family: inherit;
-    font-size: 12px;
-    -webkit-tap-highlight-color: transparent;
-    touch-action: manipulation;
-  }}
-  .cal-cell.has-data {{
-    background: #C6F6D5 !important;
-    border-color: #1F7A4C;
-    color: #14532d;
-  }}
-  .cal-cell.selected {{
-    background: #3E4197 !important;
-    color: #fff !important;
-    border-color: #2A2D7A;
-  }}
-  .cal-cell.muted {{
-    background: transparent;
-    color: transparent;
-    pointer-events: none;
-    border: none;
-  }}
-  .cal-head {{
-    text-align: center;
-    font-size: 10px;
-    color: #7A8B9C;
-    font-weight: 600;
-    height: 20px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }}
-  button.cal-cell:hover {{ filter: brightness(0.96); }}
-  @media (max-width: 420px) {{
-    .cal-grid {{ gap: 2px; font-size: 11px; }}
-    .cal-cell {{ height: 36px; min-height: 36px; font-size: 12px; }}
-  }}
-</style>
-</head><body>
-<script>
-function _nav(mut) {{
-  const u = new URL(window.parent.location.href);
-  mut(u);
-  u.searchParams.set("lang", "{lang}");
-  {admin_js}
-  window.parent.location.href = u.toString();
-}}
-function pickDay(iso) {{
-  _nav(function(u) {{
-    u.searchParams.set("cal_day", iso);
-    u.searchParams.delete("cal_week");
-    u.searchParams.delete("cal_view");
-  }});
-}}
-function pickWeek(wid) {{
-  _nav(function(u) {{
-    u.searchParams.set("cal_week", wid);
-    u.searchParams.delete("cal_day");
-    u.searchParams.delete("cal_view");
-  }});
-}}
-</script>
-<div class="cal-wrap"><div class="cal-grid">{"".join(cells)}</div></div>
-</body></html>
-"""
-cal_iframe_h = 28 + n_weeks * (cal_cell_h + 4) + (40 if _mobile else 16)
-components.html(cal_html, height=cal_iframe_h, scrolling=False)
 st.caption(t(lang, "cal_hint"))
 
 cal_y, cal_m = st.session_state.cal_year, st.session_state.cal_month
