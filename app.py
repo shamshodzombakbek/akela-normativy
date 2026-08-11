@@ -538,7 +538,7 @@ div[data-testid="stPlotlyChart"]:hover {
     unsafe_allow_html=True,
 )
 
-from urllib.parse import urlencode, quote
+from urllib.parse import urlencode
 
 from i18n import t, month_name, weekday_labels
 from schedule import (
