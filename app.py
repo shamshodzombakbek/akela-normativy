@@ -308,18 +308,35 @@ from shared_store import (
 
 # Битрикс24-режим сохранён в git — временно только Excel + Google Drive.
 
+def _admin_delete_token() -> str:
+    try:
+        if hasattr(st, "secrets") and st.secrets.get("ADMIN_DELETE_TOKEN"):
+            return str(st.secrets["ADMIN_DELETE_TOKEN"]).strip()
+    except Exception:
+        pass
+    return os.getenv("ADMIN_DELETE_TOKEN", "").strip()
+
+
+_admin_token = _admin_delete_token()
+_admin_unlocked = bool(
+    _admin_token
+    and str(st.query_params.get("admin") or "").strip() == _admin_token
+)
+
 now = now_tashkent()
 current_slot = active_window_day(now)
 upload_ok, upload_reason = can_upload_for_day(current_slot, now)
 
-# Сначала рисуем заголовок загрузки, Google проверяем мягко
-if upload_ok:
-    st.caption(
-        f"Загрузите Excel за {current_slot.strftime('%d.%m.%Y')} — "
-        "диаграммы увидит любой по этой ссылке. После 20:00 (Ташкент) за сегодня добавить нельзя."
-    )
-else:
-    st.warning(upload_reason)
+# Служебные подписи под заголовками — только админу (?admin=)
+_upload_help = (
+    f"Загрузите Excel за {current_slot.strftime('%d.%m.%Y')} — "
+    "диаграммы увидит любой по этой ссылке. После 20:00 (Ташкент) за сегодня добавить нельзя."
+)
+if _admin_unlocked:
+    if upload_ok:
+        st.caption(_upload_help)
+    else:
+        st.warning(upload_reason)
 
 shared_error = None
 available_days: list = []
@@ -329,7 +346,7 @@ try:
 except Exception as exc:
     shared_error = str(exc)
 
-if shared_error:
+if shared_error and _admin_unlocked:
     st.warning(
         "Google Drive пока недоступен. Проверьте: папка расшарена "
         "Редактором на `akela-streamlit@...`, Secrets (`GOOGLE_DRIVE_FOLDER_ID` "
@@ -346,7 +363,8 @@ if upload_ok:
     )
 else:
     uploaded_files = None
-    st.info("Загрузка за этот день закрыта. Можно смотреть уже сохранённые отчёты ниже.")
+    if _admin_unlocked:
+        st.info("Загрузка за этот день закрыта. Можно смотреть уже сохранённые отчёты ниже.")
 
 if uploaded_files and st.button("Показать всем", type="primary"):
     ok_now, reason_now = can_upload_for_day(current_slot)
@@ -400,7 +418,8 @@ try:
     df, shared_meta = load_day(selected_day)
 except Exception as exc:
     if shared_error:
-        st.info("Пока нет общих данных. Загрузите Excel выше.")
+        if _admin_unlocked:
+            st.info("Пока нет общих данных. Загрузите Excel выше.")
         st.stop()
     st.error(f"Не удалось загрузить день: `{exc}`")
     st.stop()
@@ -411,21 +430,6 @@ if df is None:
 # =========================
 # Админ-панель (скрыто: ?admin=ТОКЕН из Secrets)
 # =========================
-def _admin_delete_token() -> str:
-    try:
-        if hasattr(st, "secrets") and st.secrets.get("ADMIN_DELETE_TOKEN"):
-            return str(st.secrets["ADMIN_DELETE_TOKEN"]).strip()
-    except Exception:
-        pass
-    return os.getenv("ADMIN_DELETE_TOKEN", "").strip()
-
-
-_admin_token = _admin_delete_token()
-_admin_unlocked = bool(
-    _admin_token
-    and str(st.query_params.get("admin") or "").strip() == _admin_token
-)
-
 staffing_ov: dict = {}
 try:
     staffing_ov = load_staffing_overrides()
@@ -464,6 +468,12 @@ if _admin_unlocked:
             f"День {selected_day.strftime('%d.%m.%Y')} · правки в любое время, "
             "в т.ч. после 20:00. Сохраняется в shared_kpi.json."
         )
+        if upload_ok:
+            st.caption(_upload_help)
+        else:
+            st.caption(upload_reason)
+        if shared_error:
+            st.warning(f"Google Drive: `{shared_error}`")
         tab_status, tab_staff, tab_excel = st.tabs(
             ["Статусы сдачи", "Штатка", "Excel-записи"]
         )
@@ -678,7 +688,8 @@ if not staffing.empty:
     )
 elif not roster.empty:
     bits.append(f"В списке: {attendance.attrs.get('total', len(attendance))}")
-st.caption(" · ".join(bits))
+if _admin_unlocked:
+    st.caption(" · ".join(bits))
 
 # =========================
 # Штат (без вакансий) + сдача
@@ -707,12 +718,13 @@ if not filled_staff.empty or not vacancies.empty or not roster.empty:
     s4.metric("Не сдали", miss_n)
     denom = int(filled_staff.attrs.get("people_total") or seats_filled or 0)
     exempt_n = int(filled_staff.attrs.get("exempt") or 0)
-    st.caption(
-        f"Сдали {people_rate:.0f}% от должностей, которые обязаны сдавать"
-        + (f" ({denom})" if denom else "")
-        + (f" · директора вне графика: {exempt_n}" if exempt_n else "")
-        + (f" · вакансий отдельно: {seats_vacant}" if seats_vacant else "")
-    )
+    if _admin_unlocked:
+        st.caption(
+            f"Сдали {people_rate:.0f}% от должностей, которые обязаны сдавать"
+            + (f" ({denom})" if denom else "")
+            + (f" · директора вне графика: {exempt_n}" if exempt_n else "")
+            + (f" · вакансий отдельно: {seats_vacant}" if seats_vacant else "")
+        )
 
     status_filter = st.radio(
         "Фильтр штата",
@@ -752,7 +764,7 @@ if not filled_staff.empty or not vacancies.empty or not roster.empty:
     unmatched = list(filled_staff.attrs.get("unmatched_uploads") or []) or list(
         attendance.attrs.get("unmatched_uploads") or []
     )
-    if unmatched:
+    if unmatched and _admin_unlocked:
         st.caption(
             "Отчёты вне списка (не сопоставлены с ФИО/должностью): "
             + ", ".join(unmatched[:12])
@@ -764,9 +776,11 @@ if not filled_staff.empty or not vacancies.empty or not roster.empty:
     # =========================
     st.markdown('<p class="akela-section-label">Вакансии</p>', unsafe_allow_html=True)
     if vacancies.empty:
-        st.caption("Вакансий нет.")
+        if _admin_unlocked:
+            st.caption("Вакансий нет.")
     else:
-        st.caption(f"Открытых вакансий: {len(vacancies)}")
+        if _admin_unlocked:
+            st.caption(f"Открытых вакансий: {len(vacancies)}")
         search_vac = st.text_input(
             "Поиск по вакансиям",
             placeholder="Должность или код…",
@@ -822,7 +836,7 @@ else:
 
 st.markdown('<p class="akela-section-label">Сводка по загруженным %</p>', unsafe_allow_html=True)
 
-if not has_uploads:
+if not has_uploads and _admin_unlocked:
     st.caption("Пока нет загруженных Excel — статистика: 100% не сдали.")
 
 with_kpi = chart_df[chart_df["KPI"] > 0] if "KPI" in chart_df.columns else chart_df
@@ -913,7 +927,8 @@ with col2:
     st.plotly_chart(pie2, use_container_width=True)
 
 if not has_uploads:
-    st.caption("Диаграммы: 100% «не сдал» — пока никто не загрузил Excel за этот день.")
+    if _admin_unlocked:
+        st.caption("Диаграммы: 100% «не сдал» — пока никто не загрузил Excel за этот день.")
     st.stop()
 
 sort_cols = st.columns([2.2, 1.2])
