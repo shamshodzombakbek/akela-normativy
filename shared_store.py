@@ -574,7 +574,7 @@ def publish_day_snapshot(
             and day == active_window_day()
         ):
             raise RuntimeError(
-                "Сейчас вне окна 16:00–20:00 (Ташкент). Обновление из Битрикс закрыто."
+                "Сейчас вне окна 16:00–18:30 (Ташкент). Обновление из Битрикс закрыто."
             )
 
     key = day.isoformat()
@@ -582,7 +582,7 @@ def publish_day_snapshot(
     existing_slot = store["days"].get(key) or {}
     if existing_slot.get("frozen") and not force:
         raise RuntimeError(
-            f"День {day.strftime('%d.%m.%Y')} уже закрыт после 20:00 — добавлять отчёты нельзя."
+            f"День {day.strftime('%d.%m.%Y')} уже закрыт после 18:30 — добавлять отчёты нельзя."
         )
 
     now_s = _utc_now()

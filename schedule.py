@@ -1,4 +1,4 @@
-"""Расписание окна обновления (Ташкент): 16:00–20:00, без воскресенья."""
+"""Расписание окна обновления (Ташкент): 16:00–18:30, без воскресенья."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 TZ = ZoneInfo("Asia/Tashkent")
 WINDOW_START = time(16, 0)
-WINDOW_END = time(20, 0)
+WINDOW_END = time(18, 30)
 
 
 def now_tashkent() -> datetime:
@@ -32,28 +32,28 @@ def previous_work_day(d: date) -> date:
 
 def active_window_day(now: datetime | None = None) -> date:
     """
-    Текущий слот отчёта:
-    - воскресенье → всегда суббота;
+    Какой день «показывается» сейчас:
+    - воскресенье → суббота;
     - до 16:00 → предыдущий рабочий слот (вс пропускаем);
-    - с 16:00 → сегодняшний день (вс не бывает).
+    - с 16:00 → сегодняшний день.
+
+    Пример: 12-го до 16:00 виден 11-й; с 16:00 — 12-й.
     """
     now = now or now_tashkent()
     today = now.date()
     t = now.timetz().replace(tzinfo=None)
 
-    # Воскресенье: слота нет — показываем субботу
     if is_sunday(today):
         return today - timedelta(days=1)
 
     if t < WINDOW_START:
-        # Пн утро → вс → сб; остальные → вчера
         return previous_work_day(today)
 
     return today
 
 
 def is_fetch_window(now: datetime | None = None) -> bool:
-    """16:00–20:00, в воскресенье обновления нет."""
+    """16:00–18:30, в воскресенье обновления нет."""
     now = now or now_tashkent()
     if is_sunday(now.date()):
         return False
@@ -62,7 +62,7 @@ def is_fetch_window(now: datetime | None = None) -> bool:
 
 
 def is_after_upload_deadline(now: datetime | None = None) -> bool:
-    """После 20:00 по Ташкенту (в этот календарный день)."""
+    """После 18:30 по Ташкенту (в этот календарный день)."""
     now = now or now_tashkent()
     t = now.timetz().replace(tzinfo=None)
     return t > WINDOW_END
@@ -70,30 +70,45 @@ def is_after_upload_deadline(now: datetime | None = None) -> bool:
 
 def can_upload_for_day(day: date, now: datetime | None = None) -> tuple[bool, str]:
     """
-    Можно ли добавить Excel в слот day.
-    После 20:00 (Ташкент) — нельзя добавлять за сегодняшний день.
+    Приём Excel только 16:00–18:30 и только за активный день окна.
+
+    До 16:00 следующего дня вчерашний слот ещё виден, но загрузка закрыта.
     """
     now = now or now_tashkent()
     today = now.date()
-    t = now.timetz().replace(tzinfo=None)
+    active = active_window_day(now)
 
     if is_sunday(today):
         return False, "В воскресенье загрузка отчётов закрыта."
 
-    if day == today and t > WINDOW_END:
+    if day > today:
+        return False, f"День {day.strftime('%d.%m.%Y')} ещё не наступил."
+
+    if day != active:
         return (
             False,
-            "После 20:00 (Ташкент) нельзя добавить отчёты за сегодня. "
-            "Слот закроется до следующего рабочего дня (с 16:00).",
+            f"Для {day.strftime('%d.%m.%Y')} загрузка отчётов уже закрыта."
+            if day < active
+            else (
+                f"Сейчас показывается слот {active.strftime('%d.%m.%Y')}. "
+                "Приём только 16:00–18:30 за активный день."
+            ),
         )
 
-    # прошлые слоты не трогаем после наступления нового активного дня
-    active = active_window_day(now)
-    if day < active:
+    # day == active — загрузка только внутри окна 16:00–18:30
+    if not is_fetch_window(now):
+        t = now.timetz().replace(tzinfo=None)
+        if t < WINDOW_START:
+            # до 16:00 активен вчерашний слот — его окно уже закончилось вчера в 18:30
+            return (
+                False,
+                f"Для {day.strftime('%d.%m.%Y')} загрузка отчётов уже закрыта. "
+                "Новый день откроется сегодня с 16:00.",
+            )
         return (
             False,
-            f"День {day.strftime('%d.%m.%Y')} уже закрыт для загрузки. "
-            f"Активный слот: {active.strftime('%d.%m.%Y')}.",
+            f"Для {day.strftime('%d.%m.%Y')} загрузка отчётов уже закрыта "
+            "(окно было 16:00–18:30). До 16:00 следующего дня слот ещё виден.",
         )
 
     return True, ""
@@ -108,10 +123,7 @@ def viewer_upload_status(
     month: int | None = None,
     now: datetime | None = None,
 ) -> str | None:
-    """
-    Текст статуса для наблюдателей рядом с «Сейчас смотрим».
-    Админ ограничений не видит — эта строка только для публичного вида.
-    """
+    """Текст статуса для наблюдателей рядом с «Сейчас смотрим»."""
     now = now or now_tashkent()
     today = now.date()
     kind = (kind or "day").strip().lower()
@@ -120,9 +132,9 @@ def viewer_upload_status(
         if day > today:
             return "этот день ещё не наступил"
         ok, _ = can_upload_for_day(day, now)
-        if not ok:
-            return "для этого дня загрузка отчётов уже закрыта"
-        return "идёт окно приёма отчётов"
+        if ok:
+            return "идёт приём отчётов (16:00–18:30)"
+        return "для этого дня загрузка отчётов уже закрыта"
 
     if kind == "week" and week_key:
         try:
@@ -133,7 +145,7 @@ def viewer_upload_status(
             return "для этой недели загрузка отчётов уже закрыта"
         if ws > today:
             return "эта неделя ещё не наступила"
-        return "текущая неделя · приём отчётов по дням"
+        return "текущая неделя · приём по дням 16:00–18:30"
 
     if kind == "month" and year and month:
         first = date(year, month, 1)
@@ -145,7 +157,7 @@ def viewer_upload_status(
             return "для этого месяца загрузка отчётов уже закрыта"
         if first > today:
             return "этот месяц ещё не наступил"
-        return "текущий месяц · приём отчётов по дням"
+        return "текущий месяц · приём по дням 16:00–18:30"
 
     return None
 
@@ -166,11 +178,14 @@ def status_label(now: datetime | None = None) -> str:
         return f"Воскресенье · обновлений нет · показ субботы {day.strftime('%d.%m.%Y')}"
     if is_fetch_window(now):
         return (
-            f"Идёт обновление · слот {day.strftime('%d.%m.%Y')} · "
+            f"Идёт приём · слот {day.strftime('%d.%m.%Y')} · 16:00–18:30 · "
             f"Битрикс за {bitrix_target_day(day).strftime('%d.%m.%Y')}"
         )
-    if now.date() == day and now.timetz().replace(tzinfo=None) > WINDOW_END:
-        return f"Окно закрыто · показ результата за {day.strftime('%d.%m.%Y')} до 16:00 следующего рабочего дня"
+    if now.timetz().replace(tzinfo=None) > WINDOW_END and now.date() == day:
+        return (
+            f"Окно закрыто · показ {day.strftime('%d.%m.%Y')} "
+            "до 16:00 следующего рабочего дня"
+        )
     return f"Показ сохранённого результата · слот {day.strftime('%d.%m.%Y')}"
 
 
