@@ -99,6 +99,57 @@ def can_upload_for_day(day: date, now: datetime | None = None) -> tuple[bool, st
     return True, ""
 
 
+def viewer_upload_status(
+    *,
+    kind: str,
+    day: date | None = None,
+    week_key: str | None = None,
+    year: int | None = None,
+    month: int | None = None,
+    now: datetime | None = None,
+) -> str | None:
+    """
+    Текст статуса для наблюдателей рядом с «Сейчас смотрим».
+    Админ ограничений не видит — эта строка только для публичного вида.
+    """
+    now = now or now_tashkent()
+    today = now.date()
+    kind = (kind or "day").strip().lower()
+
+    if kind == "day" and day is not None:
+        if day > today:
+            return "этот день ещё не наступил"
+        ok, _ = can_upload_for_day(day, now)
+        if not ok:
+            return "для этого дня загрузка отчётов уже закрыта"
+        return "идёт окно приёма отчётов"
+
+    if kind == "week" and week_key:
+        try:
+            ws, we = parse_week_id(week_key)
+        except Exception:
+            return None
+        if we < today:
+            return "для этой недели загрузка отчётов уже закрыта"
+        if ws > today:
+            return "эта неделя ещё не наступила"
+        return "текущая неделя · приём отчётов по дням"
+
+    if kind == "month" and year and month:
+        first = date(year, month, 1)
+        if month == 12:
+            last = date(year, 12, 31)
+        else:
+            last = date(year, month + 1, 1) - timedelta(days=1)
+        if last < today:
+            return "для этого месяца загрузка отчётов уже закрыта"
+        if first > today:
+            return "этот месяц ещё не наступил"
+        return "текущий месяц · приём отчётов по дням"
+
+    return None
+
+
 def bitrix_target_day(window_day: date) -> date:
     """
     За какой день качать Normativ.

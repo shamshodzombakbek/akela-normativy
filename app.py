@@ -318,6 +318,7 @@ from schedule import (
     weeks_in_month,
     month_days,
     parse_week_id,
+    viewer_upload_status,
 )
 from shared_store import (
     load_day,
@@ -495,7 +496,18 @@ else:
 
 st.info(f"Сейчас смотрим: **{view_title}**")
 
-# ---- Загрузка Excel (только админ ?admin=) ----
+# Статус для наблюдателей (рядом с выбранным периодом)
+if not _admin_unlocked:
+    if view_mode == "day" and selected_day is not None:
+        _vnote = viewer_upload_status(kind="day", day=selected_day)
+    elif view_mode == "week" and selected_week:
+        _vnote = viewer_upload_status(kind="week", week_key=selected_week)
+    else:
+        _vnote = viewer_upload_status(kind="month", year=cal_y, month=cal_m)
+    if _vnote:
+        st.caption(f"· {_vnote}")
+
+# ---- Загрузка Excel (только админ ?admin=, без ограничений по дате) ----
 if _admin_unlocked:
     st.markdown('<p class="akela-section-label">Загрузка Excel</p>', unsafe_allow_html=True)
     upload_kind_label = st.radio(
@@ -508,13 +520,9 @@ if _admin_unlocked:
 
     if upload_kind == "day":
         target_ref = selected_day or current_slot
-        ok_up, reason_up = can_upload_for_day(target_ref)
         st.caption(
-            f"Слот дня: {target_ref.strftime('%d.%m.%Y')}. "
-            "После 20:00 (Ташкент) за сегодня добавить нельзя."
+            f"Слот дня: {target_ref.strftime('%d.%m.%Y')} · админ — без ограничений по времени"
         )
-        if not ok_up:
-            st.warning(reason_up)
     elif upload_kind == "week":
         if selected_week:
             target_ref, _ = parse_week_id(selected_week)
@@ -522,12 +530,10 @@ if _admin_unlocked:
             target_ref = selected_day
         else:
             target_ref = current_slot
-        ok_up, reason_up = True, ""
-        st.caption(f"Недельный слот: {week_id(target_ref)}")
+        st.caption(f"Недельный слот: {week_id(target_ref)} · админ — без ограничений")
     else:
         target_ref = date(cal_y, cal_m, 1)
-        ok_up, reason_up = True, ""
-        st.caption(f"Месячный слот: {month_id(target_ref)}")
+        st.caption(f"Месячный слот: {month_id(target_ref)} · админ — без ограничений")
 
     if shared_error:
         st.warning(
@@ -535,25 +541,15 @@ if _admin_unlocked:
             f"`{shared_error}`"
         )
 
-    uploaded_files = None
-    if ok_up:
-        uploaded_files = st.file_uploader(
-            "Excel-отчёты",
-            type=["xlsx", "xls"],
-            accept_multiple_files=True,
-            label_visibility="collapsed",
-            key=f"uploader_{upload_kind}",
-        )
-    else:
-        st.info("Загрузка для выбранного периода закрыта.")
+    uploaded_files = st.file_uploader(
+        "Excel-отчёты",
+        type=["xlsx", "xls"],
+        accept_multiple_files=True,
+        label_visibility="collapsed",
+        key=f"uploader_{upload_kind}",
+    )
 
     if uploaded_files and st.button("Показать всем", type="primary"):
-        if upload_kind == "day":
-            ok_now, reason_now = can_upload_for_day(target_ref)
-            if not ok_now:
-                st.error(reason_now)
-                st.stop()
-
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         local_dir = ROOT / "downloads" / "uploads" / stamp
         local_dir.mkdir(parents=True, exist_ok=True)
@@ -577,6 +573,7 @@ if _admin_unlocked:
                         window_day=target_ref,
                         replace=False,
                         allow_outside_window=True,
+                        force=True,
                     )
                 else:
                     df_pub, meta = publish_period_snapshot(
@@ -585,6 +582,7 @@ if _admin_unlocked:
                         ref=target_ref,
                         replace=False,
                         allow_outside_window=True,
+                        force=True,
                     )
             st.success(
                 f"Сохранено ({upload_kind_label.lower()}): "

@@ -437,10 +437,12 @@ def publish_period_snapshot(
     ref: date | None = None,
     replace: bool = True,
     allow_outside_window: bool = False,
+    force: bool = False,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """
     Сохранить снимок периода.
     day — прежние правила окна; week/month — без окна 16–20 (отдельные отчёты).
+    force=True — админ без ограничений.
     """
     kind = (kind or "day").strip().lower()
     anchor = ref or active_window_day()
@@ -450,6 +452,7 @@ def publish_period_snapshot(
             window_day=anchor,
             replace=replace,
             allow_outside_window=allow_outside_window,
+            force=force,
         )
 
     store, disk_meta = _load_raw_store()
@@ -549,30 +552,35 @@ def publish_day_snapshot(
     window_day: date | None = None,
     replace: bool = True,
     allow_outside_window: bool = False,
+    force: bool = False,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """
     Сохранить снимок за слот.
     replace=True — полностью заменить сотрудников слота (типично для Битрикс-fetch).
     allow_outside_window=True — ручная загрузка Excel вне окна 16–20.
+    force=True — админ: без окна и без блокировки frozen.
     """
     store, disk_meta = _load_raw_store()
     day = window_day or active_window_day()
 
-    ok, reason = can_upload_for_day(day)
-    if not ok:
-        raise RuntimeError(reason)
+    if not force:
+        ok, reason = can_upload_for_day(day)
+        if not ok:
+            raise RuntimeError(reason)
 
-    if (
-        not allow_outside_window
-        and not is_fetch_window()
-        and day == active_window_day()
-    ):
-        raise RuntimeError("Сейчас вне окна 16:00–20:00 (Ташкент). Обновление из Битрикс закрыто.")
+        if (
+            not allow_outside_window
+            and not is_fetch_window()
+            and day == active_window_day()
+        ):
+            raise RuntimeError(
+                "Сейчас вне окна 16:00–20:00 (Ташкент). Обновление из Битрикс закрыто."
+            )
 
     key = day.isoformat()
     store.setdefault("days", {})
     existing_slot = store["days"].get(key) or {}
-    if existing_slot.get("frozen"):
+    if existing_slot.get("frozen") and not force:
         raise RuntimeError(
             f"День {day.strftime('%d.%m.%Y')} уже закрыт после 20:00 — добавлять отчёты нельзя."
         )
@@ -599,12 +607,13 @@ def publish_day_snapshot(
     if not isinstance(preserved_overrides, dict):
         preserved_overrides = {}
 
+    keep_frozen = bool(existing_slot.get("frozen")) if force else False
     store["days"][key] = {
         "window_day": key,
         "bitrix_day": bitrix_target_day(day).isoformat(),
         "employees": employees,
         "updated_at": now_s,
-        "frozen": False,
+        "frozen": keep_frozen,
         "seat_overrides": preserved_overrides,
     }
 
@@ -629,7 +638,7 @@ def publish_day_snapshot(
         window_day=key,
         bitrix_day=bitrix_target_day(day).isoformat(),
         updated_at=now_s,
-        frozen=False,
+        frozen=keep_frozen,
         count=len(df),
         seat_overrides=preserved_overrides,
         available_days=[d.isoformat() for d in list_available_days(store)],
