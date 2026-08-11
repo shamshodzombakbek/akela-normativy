@@ -265,90 +265,93 @@ a.cal-cell:hover { filter: brightness(0.96); color: inherit; }
   color: transparent;
   pointer-events: none;
 }
-/* компактные кнопки дней календаря — уже, чем раньше */
-.akela-cal-panel div[data-testid="stHorizontalBlock"] {
+/* Streamlit не оборачивает кнопки в markdown-div — целимся через :has(маркер) */
+div[data-testid="stVerticalBlock"]:has(.akela-cal-panel) div[data-testid="stHorizontalBlock"] {
   gap: 2px !important;
   flex-wrap: nowrap !important;
 }
-.akela-cal-panel div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
+div[data-testid="stVerticalBlock"]:has(.akela-cal-panel) div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
   min-width: 0 !important;
   flex: 1 1 0 !important;
 }
-.akela-cal-panel button[data-testid="baseButton-secondary"],
-.akela-cal-panel button[data-testid="baseButton-primary"],
-.akela-cal-panel .stButton > button {
-  min-height: 20px !important;
-  height: 20px !important;
+div[data-testid="stVerticalBlock"]:has(.akela-cal-panel) button[data-testid="baseButton-secondary"],
+div[data-testid="stVerticalBlock"]:has(.akela-cal-panel) button[data-testid="baseButton-primary"],
+div[data-testid="stVerticalBlock"]:has(.akela-cal-panel) .stButton > button {
+  min-height: 22px !important;
+  height: 22px !important;
+  max-height: 22px !important;
   padding: 0 !important;
   font-size: 10px !important;
-  border-radius: 3px !important;
+  border-radius: 4px !important;
   box-shadow: none !important;
   line-height: 1 !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  letter-spacing: 0 !important;
 }
-.akela-cal-panel button[data-testid="baseButton-secondary"] {
+div[data-testid="stVerticalBlock"]:has(.akela-cal-panel) button[data-testid="baseButton-secondary"] {
   background: #EEF2F6 !important;
   border: 1px solid transparent !important;
   color: #1A2332 !important;
 }
-.akela-cal-panel button[kind="primary"],
-.akela-cal-panel button[data-testid="baseButton-primary"] {
+div[data-testid="stVerticalBlock"]:has(.akela-cal-panel) button[kind="primary"],
+div[data-testid="stVerticalBlock"]:has(.akela-cal-panel) button[data-testid="baseButton-primary"] {
   background: #3E4197 !important;
   border: 1px solid #2A2D7A !important;
   color: #fff !important;
+  background-image: none !important;
 }
 /* дни с отчётами */
-.akela-cal-panel button[data-testid="baseButton-secondary"][aria-label*="report"],
-.akela-cal-panel .stTooltipHoverTarget:has([aria-label*="report"]) button[data-testid="baseButton-secondary"] {
+div[data-testid="stVerticalBlock"]:has(.akela-cal-panel) button[data-testid="baseButton-secondary"][aria-label*="report"],
+div[data-testid="stVerticalBlock"]:has(.akela-cal-panel) button[title*="report"],
+div[data-testid="stVerticalBlock"]:has(.akela-cal-panel) .stTooltipHoverTarget:has([aria-label*="report"]) button[data-testid="baseButton-secondary"] {
   background: #C6F6D5 !important;
   border: 1px solid #1F7A4C !important;
   color: #14532d !important;
 }
-.akela-cal-nav button[data-testid="baseButton-secondary"],
-.akela-cal-nav button[data-testid="baseButton-primary"],
-.akela-cal-nav .stButton > button {
+div[data-testid="stVerticalBlock"]:has(.akela-cal-nav) button[data-testid="baseButton-secondary"],
+div[data-testid="stVerticalBlock"]:has(.akela-cal-nav) button[data-testid="baseButton-primary"],
+div[data-testid="stVerticalBlock"]:has(.akela-cal-nav) .stButton > button {
   min-height: 26px !important;
   height: 26px !important;
-  padding: 0 0.35rem !important;
+  max-height: 26px !important;
+  padding: 0 0.3rem !important;
   font-size: 11px !important;
   box-shadow: none !important;
-}
-@media (max-width: 768px) {
-  .akela-cal-panel button[data-testid="baseButton-secondary"],
-  .akela-cal-panel button[data-testid="baseButton-primary"],
-  .akela-cal-panel .stButton > button {
-    min-height: 24px !important;
-    height: 24px !important;
-    font-size: 11px !important;
-  }
+  white-space: nowrap !important;
 }
 
-.lang-flags div[data-testid="stHorizontalBlock"] {
+div[data-testid="stVerticalBlock"]:has(.lang-flags) div[data-testid="stHorizontalBlock"] {
   gap: 6px !important;
   flex-wrap: nowrap !important;
   justify-content: center !important;
 }
-.lang-flags div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
-  min-width: 30px !important;
-  flex: 0 0 30px !important;
-  width: 30px !important;
+div[data-testid="stVerticalBlock"]:has(.lang-flags) div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
+  min-width: 32px !important;
+  flex: 0 0 32px !important;
+  width: 32px !important;
+  max-width: 32px !important;
 }
-.lang-flags button[data-testid="baseButton-secondary"],
-.lang-flags button[data-testid="baseButton-primary"],
-.lang-flags .stButton > button {
-  width: 30px !important;
-  height: 30px !important;
-  min-height: 30px !important;
+div[data-testid="stVerticalBlock"]:has(.lang-flags) button[data-testid="baseButton-secondary"],
+div[data-testid="stVerticalBlock"]:has(.lang-flags) button[data-testid="baseButton-primary"],
+div[data-testid="stVerticalBlock"]:has(.lang-flags) .stButton > button {
+  width: 32px !important;
+  height: 32px !important;
+  min-height: 32px !important;
+  max-height: 32px !important;
   border-radius: 50% !important;
   padding: 0 !important;
   font-size: 0 !important;
+  line-height: 0 !important;
   color: transparent !important;
   box-shadow: none !important;
   overflow: hidden !important;
   border: 2px solid #D5E0EA !important;
   background-size: cover !important;
   background-position: center !important;
+  background-repeat: no-repeat !important;
 }
-.lang-flags button[data-testid="baseButton-primary"] {
+div[data-testid="stVerticalBlock"]:has(.lang-flags) button[data-testid="baseButton-primary"] {
   border-color: #3E4197 !important;
   box-shadow: 0 0 0 2px rgba(62,65,151,0.25) !important;
 }
@@ -460,36 +463,7 @@ button[data-testid="baseButton-secondary"],
   padding: 0.45rem 0.8rem !important;
 }
 
-/* компактные ячейки календаря */
-div.akela-cal-grid button[data-testid="baseButton-secondary"],
-div.akela-cal-grid button[data-testid="baseButton-primary"],
-div.akela-cal-grid .stButton > button {
-  min-height: 2.1rem !important;
-  height: 2.1rem !important;
-  padding: 0 !important;
-  font-size: 0.8rem !important;
-  border-radius: 4px !important;
-  box-shadow: none !important;
-}
-div.akela-cal-grid button[data-testid="baseButton-secondary"] {
-  background: #EEF2F6 !important;
-}
-/* дни с отчётами — зелёный фон через data- атрибут не доступен;
-   зелёная точка в подписи кнопки */
-@media (max-width: 768px) {
-  div.akela-cal-grid button[data-testid="baseButton-secondary"],
-  div.akela-cal-grid button[data-testid="baseButton-primary"],
-  div.akela-cal-grid .stButton > button {
-    min-height: 2.55rem !important;
-    height: 2.55rem !important;
-    font-size: 0.85rem !important;
-  }
-  .stButton > button {
-    padding: 0.5rem 0.7rem !important;
-    box-shadow: none !important;
-    min-height: 2.5rem !important;
-  }
-}
+/* не раздуваем все кнопки на мобилке — календарь/флаги остаются компактными */
 
 hr {
   border: none !important;
@@ -679,7 +653,7 @@ except Exception as exc:
     shared_error = str(exc)
 
 # ---- шапка: логотип | календарь по центру | флаги справа ----
-top_logo, top_cal, top_lang = st.columns([1.05, 2.2, 0.95])
+top_logo, top_cal, top_lang = st.columns([1.0, 1.55, 0.95])
 
 with top_logo:
     if LOGO_PATH.exists():
@@ -741,8 +715,7 @@ with top_lang:
     st.markdown("</div>", unsafe_allow_html=True)
 
 with top_cal:
-    # узкая внутренняя колонка — календарь визуально маленький, как на 2-м фото
-    _sp_l, cal_box, _sp_r = st.columns([0.55, 2.0, 0.55])
+    cal_box = top_cal
     with cal_box:
         st.markdown(
             f'<p class="akela-section-label" style="margin:0 0 0.2rem;text-align:center;'
@@ -859,7 +832,7 @@ with top_cal:
         st.markdown("</div>", unsafe_allow_html=True)
         st.caption(t(lang, "cal_hint"))
 
-# визуал круглых флагов + зелёных дней (клики уже через Streamlit)
+# визуал круглых флагов + компактных дней (клики уже через Streamlit)
 import json as _json
 _flag_payload = _json.dumps({k: v for k, v in _flag_svg_b64.items()})
 components.html(
@@ -871,45 +844,58 @@ components.html(
       function toDataUri(svg) {{
         return 'url("data:image/svg+xml,' + encodeURIComponent(svg) + '")';
       }}
-      // языки: кнопка с help lang-xx → круглый флаг
-      doc.querySelectorAll('button').forEach(function (btn) {{
-        const tip = (btn.getAttribute('aria-label') || btn.getAttribute('title') || '');
-        const m = tip.match(/lang-(uz|ru|en)/);
-        if (!m) return;
-        const code = m[1];
-        btn.style.backgroundImage = toDataUri(flags[code]);
-        btn.style.backgroundSize = 'cover';
-        btn.style.backgroundPosition = 'center';
-        btn.style.color = 'transparent';
-        btn.style.fontSize = '0';
-        btn.style.borderRadius = '50%';
-        btn.style.width = '30px';
-        btn.style.height = '30px';
-        btn.style.minHeight = '30px';
-        btn.style.padding = '0';
-        btn.style.overflow = 'hidden';
-      }});
-      // дни: ещё компактнее + зелёные report
-      doc.querySelectorAll('button[data-testid="baseButton-secondary"], button[data-testid="baseButton-primary"]').forEach(function (btn) {{
-        const label = (btn.innerText || '').trim();
-        if (!/^\\d{{1,2}}$/.test(label)) return;
-        btn.style.minHeight = '20px';
-        btn.style.height = '20px';
-        btn.style.padding = '0';
-        btn.style.fontSize = '10px';
-        btn.style.boxShadow = 'none';
-        btn.style.borderRadius = '3px';
-        const tip = (btn.getAttribute('aria-label') || btn.getAttribute('title') || '');
-        const isPrimary = (btn.getAttribute('data-testid') || '').indexOf('primary') >= 0;
-        if (!isPrimary && tip.indexOf('report') >= 0) {{
-          btn.style.background = '#C6F6D5';
-          btn.style.border = '1px solid #1F7A4C';
-          btn.style.color = '#14532d';
-        }} else if (!isPrimary) {{
-          btn.style.background = '#EEF2F6';
-          btn.style.color = '#1A2332';
-        }}
-      }});
+      function paint() {{
+        doc.querySelectorAll('button').forEach(function (btn) {{
+          const tip = (btn.getAttribute('aria-label') || btn.getAttribute('title') || '');
+          const txt = (btn.innerText || '').trim().toUpperCase();
+          let code = null;
+          const m = tip.match(/lang-(uz|ru|en)/i);
+          if (m) code = m[1].toLowerCase();
+          else if (txt === 'UZ' || txt === 'RU' || txt === 'EN') code = txt.toLowerCase();
+          if (!code || !flags[code]) return;
+          btn.style.backgroundImage = toDataUri(flags[code]);
+          btn.style.backgroundSize = 'cover';
+          btn.style.backgroundPosition = 'center';
+          btn.style.color = 'transparent';
+          btn.style.fontSize = '0';
+          btn.style.lineHeight = '0';
+          btn.style.borderRadius = '50%';
+          btn.style.width = '32px';
+          btn.style.height = '32px';
+          btn.style.minHeight = '32px';
+          btn.style.maxHeight = '32px';
+          btn.style.padding = '0';
+          btn.style.overflow = 'hidden';
+        }});
+        doc.querySelectorAll('button[data-testid="baseButton-secondary"], button[data-testid="baseButton-primary"]').forEach(function (btn) {{
+          const label = (btn.innerText || '').trim();
+          if (!/^\\d{{1,2}}$/.test(label) && label !== '·') return;
+          btn.style.minHeight = '22px';
+          btn.style.height = '22px';
+          btn.style.maxHeight = '22px';
+          btn.style.padding = '0';
+          btn.style.fontSize = '10px';
+          btn.style.lineHeight = '1';
+          btn.style.whiteSpace = 'nowrap';
+          btn.style.overflow = 'hidden';
+          btn.style.boxShadow = 'none';
+          btn.style.borderRadius = '4px';
+          const tip = (btn.getAttribute('aria-label') || btn.getAttribute('title') || '');
+          const isPrimary = (btn.getAttribute('data-testid') || '').indexOf('primary') >= 0;
+          if (!isPrimary && tip.indexOf('report') >= 0) {{
+            btn.style.background = '#C6F6D5';
+            btn.style.border = '1px solid #1F7A4C';
+            btn.style.color = '#14532d';
+          }} else if (!isPrimary && label !== '·') {{
+            btn.style.background = '#EEF2F6';
+            btn.style.color = '#1A2332';
+          }}
+        }});
+      }}
+      paint();
+      setTimeout(paint, 120);
+      setTimeout(paint, 400);
+      setTimeout(paint, 900);
     }})();
     </script>
     """,
