@@ -606,21 +606,90 @@ with top_lang:
         f'<p class="akela-section-label" style="margin:0 0 0.45rem">{t(lang, "lang")}</p>',
         unsafe_allow_html=True,
     )
-    flags = [("uz", "🇺🇿"), ("ru", "🇷🇺"), ("en", "🇬🇧")]
-    lang_cols = st.columns(3)
-    for i, (code, flag) in enumerate(flags):
-        with lang_cols[i]:
-            if st.button(
-                flag,
-                key=f"lang_{code}",
-                use_container_width=True,
-                type="primary" if lang == code else "secondary",
-                help=code.upper(),
-            ):
-                if code != lang:
-                    st.session_state.lang = code
-                    st.query_params["lang"] = code
-                    st.rerun()
+    # SVG-флаги (не emoji) — одинаково на Windows / Mac / Linux
+    flag_svg = {
+        "uz": (
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 200" width="28" height="20">'
+            '<rect width="300" height="200" fill="#1EB53A"/>'
+            '<rect width="300" height="133.33" fill="#FFFFFF"/>'
+            '<rect width="300" height="66.67" fill="#0099B5"/>'
+            '<rect y="60" width="300" height="6.67" fill="#CE1126"/>'
+            '<rect y="133.33" width="300" height="6.67" fill="#CE1126"/>'
+            '<circle cx="48" cy="33" r="18" fill="#fff"/>'
+            '<circle cx="55" cy="33" r="14" fill="#0099B5"/>'
+            '<g fill="#fff">'
+            '<circle cx="78" cy="16" r="2.2"/><circle cx="88" cy="22" r="2.2"/>'
+            '<circle cx="98" cy="16" r="2.2"/><circle cx="88" cy="32" r="2.2"/>'
+            '<circle cx="98" cy="28" r="2.2"/><circle cx="108" cy="22" r="2.2"/>'
+            '<circle cx="78" cy="38" r="2.2"/><circle cx="88" cy="44" r="2.2"/>'
+            '<circle cx="98" cy="40" r="2.2"/><circle cx="108" cy="34" r="2.2"/>'
+            '<circle cx="118" cy="28" r="2.2"/><circle cx="108" cy="46" r="2.2"/>'
+            '</g></svg>'
+        ),
+        "ru": (
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 9 6" width="28" height="20">'
+            '<rect fill="#fff" width="9" height="6"/>'
+            '<rect fill="#0039A6" y="2" width="9" height="4"/>'
+            '<rect fill="#D52B1E" y="4" width="9" height="2"/>'
+            "</svg>"
+        ),
+        "en": (
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 30" width="28" height="20">'
+            '<clipPath id="s"><path d="M0,0 v30 h60 v-30 z"/></clipPath>'
+            '<clipPath id="t"><path d="M30,15 h30 v15 z v15 h-30 z h-30 v-15 z v-15 h30 z"/></clipPath>'
+            '<g clip-path="url(#s)">'
+            '<path d="M0,0 v30 h60 v-30 z" fill="#012169"/>'
+            '<path d="M0,0 L60,30 M60,0 L0,30" stroke="#fff" stroke-width="6"/>'
+            '<path d="M0,0 L60,30 M60,0 L0,30" clip-path="url(#t)" stroke="#C8102E" stroke-width="4"/>'
+            '<path d="M30,0 v30 M0,15 h60" stroke="#fff" stroke-width="10"/>'
+            '<path d="M30,0 v30 M0,15 h60" stroke="#C8102E" stroke-width="6"/>'
+            "</g></svg>"
+        ),
+    }
+    admin_lang_js = (
+        f'u.searchParams.set("admin", "{_admin_token}");'
+        if _admin_unlocked and _admin_token
+        else ""
+    )
+    btns = []
+    for code in ("uz", "ru", "en"):
+        active = " active" if lang == code else ""
+        btns.append(
+            f'<button type="button" class="lang-btn{active}" title="{code.upper()}" '
+            f"onclick=\"setLang('{code}')\">{flag_svg[code]}</button>"
+        )
+    lang_html = f"""
+<!DOCTYPE html>
+<html><head><meta charset="utf-8" />
+<style>
+  html, body {{ margin: 0; padding: 0; background: transparent; }}
+  .lang-row {{ display: flex; gap: 8px; align-items: center; }}
+  .lang-btn {{
+    width: 42px; height: 42px; border-radius: 50%;
+    border: 2px solid #D5E0EA; background: #fff;
+    padding: 0; cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center;
+    overflow: hidden; box-sizing: border-box;
+  }}
+  .lang-btn.active {{
+    border-color: #3E4197;
+    box-shadow: 0 0 0 2px rgba(62,65,151,0.25);
+  }}
+  .lang-btn:hover {{ filter: brightness(0.97); }}
+  .lang-btn svg {{ display: block; border-radius: 2px; }}
+</style></head><body>
+<script>
+function setLang(code) {{
+  const u = new URL(window.parent.location.href);
+  u.searchParams.set("lang", code);
+  {admin_lang_js}
+  window.parent.location.href = u.toString();
+}}
+</script>
+<div class="lang-row">{"".join(btns)}</div>
+</body></html>
+"""
+    components.html(lang_html, height=52, scrolling=False)
 
 cal_y, cal_m = st.session_state.cal_year, st.session_state.cal_month
 month_key = f"{cal_y:04d}-{cal_m:02d}"
