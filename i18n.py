@@ -189,7 +189,7 @@ _T = {
         "max": "Max",
         "min": "Min",
         "pie_submit": "Submitted / missing",
-        "pie_cats": "KPI categories",
+        "pie_cats": "Sort by % of those who submitted",
         "people_chart": "Employees by %",
         "admin": "Admin · status & staffing",
         "closed": "report upload for this day is closed",
