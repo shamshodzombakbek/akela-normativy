@@ -179,15 +179,31 @@ html, body, [class*="css"] {
     border-radius: 8px !important;
   }
 
-  /* флаги компактнее */
+  /* флаги компактнее на телефоне */
   div[data-testid="column"]:has(.lang-flags-mark) img {
-    width: 34px !important;
-    height: 34px !important;
+    width: 24px !important;
+    height: 24px !important;
+  }
+  div[data-testid="column"]:has(.lang-flags-mark) div[data-testid="stHorizontalBlock"] {
+    gap: 4px !important;
+  }
+  div[data-testid="column"]:has(.lang-flags-mark) div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
+    min-width: 30px !important;
+    flex: 0 0 30px !important;
+    width: 30px !important;
+    max-width: 36px !important;
   }
   div[data-testid="column"]:has(.lang-flags-mark) button {
-    min-height: 32px !important;
-    height: 32px !important;
-    font-size: 10px !important;
+    min-height: 22px !important;
+    height: 22px !important;
+    max-height: 22px !important;
+    font-size: 9px !important;
+    border-radius: 10px !important;
+    padding: 0 !important;
+  }
+  div[data-testid="column"]:has(.lang-flags-mark) .akela-section-label {
+    margin-bottom: 0.1rem !important;
+    font-size: 0.55rem !important;
   }
 
   iframe {
