@@ -121,3 +121,70 @@ def status_label(now: datetime | None = None) -> str:
     if now.date() == day and now.timetz().replace(tzinfo=None) > WINDOW_END:
         return f"Окно закрыто · показ результата за {day.strftime('%d.%m.%Y')} до 16:00 следующего рабочего дня"
     return f"Показ сохранённого результата · слот {day.strftime('%d.%m.%Y')}"
+
+
+def week_start(d: date) -> date:
+    """Понедельник недели (ISO, Ташкентская дата)."""
+    return d - timedelta(days=d.weekday())
+
+
+def week_end(d: date) -> date:
+    return week_start(d) + timedelta(days=6)
+
+
+def week_id(d: date) -> str:
+    """Ключ недели: 2026-W33."""
+    iso = d.isocalendar()
+    return f"{iso.year}-W{iso.week:02d}"
+
+
+def month_id(d: date) -> str:
+    return f"{d.year:04d}-{d.month:02d}"
+
+
+def parse_week_id(key: str) -> tuple[date, date]:
+    """2026-W33 → (понедельник, воскресенье)."""
+    raw = str(key or "").strip().upper()
+    year_s, week_s = raw.split("-W", 1)
+    year, week = int(year_s), int(week_s)
+    start = date.fromisocalendar(year, week, 1)
+    return start, start + timedelta(days=6)
+
+
+def parse_month_id(key: str) -> tuple[int, int]:
+    year_s, month_s = str(key).split("-", 1)
+    return int(year_s), int(month_s)
+
+
+def weeks_in_month(year: int, month: int) -> list[tuple[str, date, date]]:
+    """Уникальные ISO-недели, пересекающие месяц."""
+    first = date(year, month, 1)
+    if month == 12:
+        last = date(year, 12, 31)
+    else:
+        last = date(year, month + 1, 1) - timedelta(days=1)
+    out: list[tuple[str, date, date]] = []
+    seen: set[str] = set()
+    cur = first
+    while cur <= last:
+        wid = week_id(cur)
+        if wid not in seen:
+            seen.add(wid)
+            ws, we = week_start(cur), week_end(cur)
+            out.append((wid, ws, we))
+        cur += timedelta(days=1)
+    return out
+
+
+def month_days(year: int, month: int) -> list[date]:
+    first = date(year, month, 1)
+    if month == 12:
+        last = date(year, 12, 31)
+    else:
+        last = date(year, month + 1, 1) - timedelta(days=1)
+    days = []
+    cur = first
+    while cur <= last:
+        days.append(cur)
+        cur += timedelta(days=1)
+    return days

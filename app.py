@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 import os
 
@@ -291,22 +291,6 @@ PLOTLY_LAYOUT = dict(
     colorway=["#3E4197", "#1F7A4C", "#B7791F", "#C53030", "#7A8B9C", "#1A2332"],
 )
 
-st.markdown('<p class="akela-section-label">Загрузка Excel</p>', unsafe_allow_html=True)
-
-from schedule import active_window_day, now_tashkent, can_upload_for_day
-from shared_store import (
-    load_day,
-    publish_day_snapshot,
-    remove_employees_from_day,
-    load_staffing_overrides,
-    upsert_seat_override,
-    clear_seat_override,
-    set_staffing_override,
-    clear_staffing_override,
-    admin_upsert_employee,
-)
-
-# Битрикс24-режим сохранён в git — временно только Excel + Google Drive.
 
 def _admin_delete_token() -> str:
     try:
@@ -323,20 +307,68 @@ _admin_unlocked = bool(
     and str(st.query_params.get("admin") or "").strip() == _admin_token
 )
 
+from schedule import (
+    active_window_day,
+    now_tashkent,
+    can_upload_for_day,
+    week_id,
+    month_id,
+    week_start,
+    week_end,
+    weeks_in_month,
+    month_days,
+    parse_week_id,
+)
+from shared_store import (
+    load_day,
+    load_period,
+    publish_day_snapshot,
+    publish_period_snapshot,
+    remove_employees_from_day,
+    load_staffing_overrides,
+    upsert_seat_override,
+    clear_seat_override,
+    set_staffing_override,
+    clear_staffing_override,
+    admin_upsert_employee,
+    days_in_week_with_data,
+    days_in_month_with_data,
+    weeks_in_month_with_data,
+    list_available_weeks,
+    list_available_months,
+)
+
+# Битрикс24-режим сохранён в git — временно только Excel + Google Drive.
+
 now = now_tashkent()
 current_slot = active_window_day(now)
 upload_ok, upload_reason = can_upload_for_day(current_slot, now)
 
-# Служебные подписи под заголовками — только админу (?admin=)
-_upload_help = (
-    f"Загрузите Excel за {current_slot.strftime('%d.%m.%Y')} — "
-    "диаграммы увидит любой по этой ссылке. После 20:00 (Ташкент) за сегодня добавить нельзя."
-)
-if _admin_unlocked:
-    if upload_ok:
-        st.caption(_upload_help)
-    else:
-        st.warning(upload_reason)
+_MONTH_NAMES_RU = [
+    "",
+    "Январь",
+    "Февраль",
+    "Март",
+    "Апрель",
+    "Май",
+    "Июнь",
+    "Июль",
+    "Август",
+    "Сентябрь",
+    "Октябрь",
+    "Ноябрь",
+    "Декабрь",
+]
+
+# ---- Календарь: месяц → неделя → день ----
+if "cal_year" not in st.session_state:
+    st.session_state.cal_year = current_slot.year
+if "cal_month" not in st.session_state:
+    st.session_state.cal_month = current_slot.month
+if "cal_week" not in st.session_state:
+    st.session_state.cal_week = None  # e.g. 2026-W33
+if "cal_day" not in st.session_state:
+    st.session_state.cal_day = None  # date or None
 
 shared_error = None
 available_days: list = []
@@ -346,31 +378,174 @@ try:
 except Exception as exc:
     shared_error = str(exc)
 
-if shared_error and _admin_unlocked:
+st.markdown('<p class="akela-section-label">Календарь отчётов</p>', unsafe_allow_html=True)
+nav_l, nav_c, nav_r = st.columns([1, 3, 1])
+with nav_l:
+    if st.button("←", use_container_width=True, key="cal_prev"):
+        m = st.session_state.cal_month - 1
+        y = st.session_state.cal_year
+        if m < 1:
+            m, y = 12, y - 1
+        st.session_state.cal_month = m
+        st.session_state.cal_year = y
+        st.session_state.cal_week = None
+        st.session_state.cal_day = None
+        st.rerun()
+with nav_c:
+    st.markdown(
+        f"<p style='text-align:center;font-family:Unbounded,sans-serif;"
+        f"font-size:1.1rem;color:#3E4197;margin:0.35rem 0'>"
+        f"{_MONTH_NAMES_RU[st.session_state.cal_month]} {st.session_state.cal_year}</p>",
+        unsafe_allow_html=True,
+    )
+with nav_r:
+    if st.button("→", use_container_width=True, key="cal_next"):
+        m = st.session_state.cal_month + 1
+        y = st.session_state.cal_year
+        if m > 12:
+            m, y = 1, y + 1
+        st.session_state.cal_month = m
+        st.session_state.cal_year = y
+        st.session_state.cal_week = None
+        st.session_state.cal_day = None
+        st.rerun()
+
+cal_y, cal_m = st.session_state.cal_year, st.session_state.cal_month
+month_key = f"{cal_y:04d}-{cal_m:02d}"
+data_days_set = {d for d in available_days if d.year == cal_y and d.month == cal_m}
+
+# Сетка календаря Пн–Вс
+st.caption("Выберите неделю или день. Без выбора дня/недели — месячный отчёт.")
+wd_labels = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
+hdr = st.columns(8)
+hdr[0].caption("Нед.")
+for i, lab in enumerate(wd_labels):
+    hdr[i + 1].caption(lab)
+
+for wid, ws, we in weeks_in_month(cal_y, cal_m):
+    row = st.columns(8)
+    week_selected = st.session_state.cal_week == wid
+    week_btn_type = "primary" if week_selected else "secondary"
+    if row[0].button(
+        wid.split("-W")[-1],
+        key=f"wk_{wid}",
+        use_container_width=True,
+        type=week_btn_type,
+        help=f"{ws.strftime('%d.%m')}–{we.strftime('%d.%m')}",
+    ):
+        if st.session_state.cal_week == wid and st.session_state.cal_day is None:
+            st.session_state.cal_week = None
+        else:
+            st.session_state.cal_week = wid
+            st.session_state.cal_day = None
+        st.rerun()
+
+    cur = ws
+    for i in range(7):
+        in_month = cur.month == cal_m and cur.year == cal_y
+        if not in_month:
+            row[i + 1].markdown("<div style='height:2.2rem'></div>", unsafe_allow_html=True)
+        else:
+            has_data = cur in data_days_set
+            is_sel = st.session_state.cal_day == cur
+            label = f"{cur.day}" + (" ·" if has_data else "")
+            if row[i + 1].button(
+                label,
+                key=f"day_{cur.isoformat()}",
+                use_container_width=True,
+                type="primary" if is_sel else "secondary",
+            ):
+                st.session_state.cal_day = cur
+                st.session_state.cal_week = week_id(cur)
+                st.rerun()
+        cur += timedelta(days=1)
+
+clr1, clr2 = st.columns([1, 3])
+with clr1:
+    if st.button("Сбросить до месяца", use_container_width=True, key="cal_reset"):
+        st.session_state.cal_week = None
+        st.session_state.cal_day = None
+        st.rerun()
+
+selected_day = st.session_state.cal_day
+selected_week = st.session_state.cal_week
+if selected_day is not None:
+    view_mode = "day"
+elif selected_week:
+    view_mode = "week"
+else:
+    view_mode = "month"
+
+if view_mode == "day":
+    view_title = f"День {selected_day.strftime('%d.%m.%Y')}"
+elif view_mode == "week":
+    try:
+        w0, w1 = parse_week_id(selected_week)
+        view_title = f"Неделя {selected_week} · {w0.strftime('%d.%m')}–{w1.strftime('%d.%m.%Y')}"
+    except Exception:
+        view_title = f"Неделя {selected_week}"
+else:
+    view_title = f"Месяц {_MONTH_NAMES_RU[cal_m]} {cal_y}"
+
+st.info(f"Сейчас смотрим: **{view_title}**")
+
+# ---- Загрузка Excel ----
+st.markdown('<p class="akela-section-label">Загрузка Excel</p>', unsafe_allow_html=True)
+upload_kind_label = st.radio(
+    "Тип отчёта",
+    ["Дневной", "Недельный", "Месячный"],
+    horizontal=True,
+    key="upload_kind",
+)
+upload_kind = {"Дневной": "day", "Недельный": "week", "Месячный": "month"}[upload_kind_label]
+
+if upload_kind == "day":
+    target_ref = selected_day or current_slot
+    ok_up, reason_up = can_upload_for_day(target_ref)
+    st.caption(
+        f"Слот дня: {target_ref.strftime('%d.%m.%Y')}. "
+        "После 20:00 (Ташкент) за сегодня добавить нельзя."
+    )
+    if not ok_up:
+        st.warning(reason_up)
+elif upload_kind == "week":
+    if selected_week:
+        target_ref, _ = parse_week_id(selected_week)
+    elif selected_day:
+        target_ref = selected_day
+    else:
+        target_ref = current_slot
+    ok_up, reason_up = True, ""
+    st.caption(f"Недельный слот: {week_id(target_ref)}")
+else:
+    target_ref = date(cal_y, cal_m, 1)
+    ok_up, reason_up = True, ""
+    st.caption(f"Месячный слот: {month_id(target_ref)}")
+
+if shared_error:
     st.warning(
-        "Google Drive пока недоступен. Проверьте: папка расшарена "
-        "Редактором на `akela-streamlit@...`, Secrets (`GOOGLE_DRIVE_FOLDER_ID` "
-        "и ключ), файл `shared_kpi.json` в этой папке.\n\n"
+        "Google Drive пока недоступен.\n\n"
         f"`{shared_error}`"
     )
 
-if upload_ok:
+uploaded_files = None
+if ok_up:
     uploaded_files = st.file_uploader(
         "Excel-отчёты",
         type=["xlsx", "xls"],
         accept_multiple_files=True,
         label_visibility="collapsed",
+        key=f"uploader_{upload_kind}",
     )
 else:
-    uploaded_files = None
-    if _admin_unlocked:
-        st.info("Загрузка за этот день закрыта. Можно смотреть уже сохранённые отчёты ниже.")
+    st.info("Загрузка для выбранного периода закрыта.")
 
 if uploaded_files and st.button("Показать всем", type="primary"):
-    ok_now, reason_now = can_upload_for_day(current_slot)
-    if not ok_now:
-        st.error(reason_now)
-        st.stop()
+    if upload_kind == "day":
+        ok_now, reason_now = can_upload_for_day(target_ref)
+        if not ok_now:
+            st.error(reason_now)
+            st.stop()
 
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     local_dir = ROOT / "downloads" / "uploads" / stamp
@@ -389,43 +564,70 @@ if uploaded_files and st.button("Показать всем", type="primary"):
 
     try:
         with st.spinner("Сохраняю для всех…"):
-            df_pub, meta = publish_day_snapshot(
-                incoming,
-                window_day=current_slot,
-                replace=False,
-                allow_outside_window=True,
-            )
+            if upload_kind == "day":
+                df_pub, meta = publish_day_snapshot(
+                    incoming,
+                    window_day=target_ref,
+                    replace=False,
+                    allow_outside_window=True,
+                )
+            else:
+                df_pub, meta = publish_period_snapshot(
+                    incoming,
+                    kind=upload_kind,
+                    ref=target_ref,
+                    replace=False,
+                    allow_outside_window=True,
+                )
         st.success(
-            f"Готово. По этой ссылке все увидят данные "
-            f"({meta.get('count', len(df_pub))} записей)."
+            f"Сохранено ({upload_kind_label.lower()}): "
+            f"{meta.get('count', len(df_pub))} записей · {meta.get('period_label') or meta.get('window_day')}"
         )
         st.rerun()
     except Exception as exc:
-        st.error(
-            "Не удалось сохранить. "
-            f"`{exc}`"
-        )
+        st.error(f"Не удалось сохранить. `{exc}`")
         st.stop()
 
-day_options = sorted({current_slot, *available_days}, reverse=True) or [current_slot]
-selected_day = st.selectbox(
-    "Какой день смотреть",
-    day_options,
-    format_func=lambda d: d.strftime("%d.%m.%Y") + (" · текущий" if d == current_slot else " · архив"),
-)
+# ---- Загрузка данных периода ----
+nested_weekly: list[tuple[str, pd.DataFrame]] = []
+nested_daily: list[tuple[date, pd.DataFrame]] = []
 
 try:
-    df, shared_meta = load_day(selected_day)
+    if view_mode == "day":
+        df, shared_meta = load_period("day", selected_day)
+    elif view_mode == "week":
+        df, shared_meta = load_period("week", selected_week)
+        for d in days_in_week_with_data(selected_week):
+            ddf, _ = load_period("day", d)
+            if not ddf.empty:
+                nested_daily.append((d, ddf))
+    else:
+        df, shared_meta = load_period("month", month_key)
+        for wkey in weeks_in_month_with_data(month_key):
+            wdf, _ = load_period("week", wkey)
+            if not wdf.empty:
+                nested_weekly.append((wkey, wdf))
+        for d in days_in_month_with_data(month_key):
+            ddf, _ = load_period("day", d)
+            if not ddf.empty:
+                nested_daily.append((d, ddf))
 except Exception as exc:
     if shared_error:
-        if _admin_unlocked:
-            st.info("Пока нет общих данных. Загрузите Excel выше.")
+        st.info("Пока нет данных за этот период. Загрузите Excel выше.")
         st.stop()
-    st.error(f"Не удалось загрузить день: `{exc}`")
+    st.error(f"Не удалось загрузить период: `{exc}`")
     st.stop()
 
 if df is None:
     df = pd.DataFrame()
+
+# Для штата/графиков primary = df периода.
+# Админ seat overrides и Excel-правки дня — только в режиме дня.
+admin_day = selected_day if view_mode == "day" and selected_day is not None else None
+if admin_day is None and view_mode == "day":
+    admin_day = current_slot
+# selected_day используется ниже в админке — подставляем день только если он выбран
+selected_day_for_admin = admin_day
 
 # =========================
 # Админ-панель (скрыто: ?admin=ТОКЕН из Secrets)
@@ -464,14 +666,7 @@ vacancies = (
 
 if _admin_unlocked:
     with st.expander("Админ · статусы и штатка", expanded=True):
-        st.caption(
-            f"День {selected_day.strftime('%d.%m.%Y')} · правки в любое время, "
-            "в т.ч. после 20:00. Сохраняется в shared_kpi.json."
-        )
-        if upload_ok:
-            st.caption(_upload_help)
-        else:
-            st.caption(upload_reason)
+        st.caption(f"{view_title} · правки сохраняются в shared_kpi.json.")
         if shared_error:
             st.warning(f"Google Drive: `{shared_error}`")
         tab_status, tab_staff, tab_excel = st.tabs(
@@ -479,81 +674,86 @@ if _admin_unlocked:
         )
 
         with tab_status:
-            editable = (
-                filled_staff[filled_staff["Статус"] != "➖ Не обязан"].copy()
-                if not filled_staff.empty
-                else pd.DataFrame()
-            )
-            if editable.empty:
-                st.info("Нет мест, по которым можно править статус.")
+            if not selected_day_for_admin:
+                st.info("Выберите день в календаре, чтобы править статусы сдачи.")
             else:
-                seat_labels = []
-                seat_codes = []
-                for _, row in editable.iterrows():
-                    code = str(row.get("Код") or "")
-                    label = (
-                        f"{code} · {row.get('Должность') or ''} · "
-                        f"{row.get('ФИО') or ''} · сейчас: {row.get('Статус') or ''}"
-                    )
-                    seat_labels.append(label)
-                    seat_codes.append(code)
-                pick_label = st.selectbox(
-                    "Место",
-                    seat_labels,
-                    key="admin_status_seat",
+                editable = (
+                    filled_staff[filled_staff["Статус"] != "➖ Не обязан"].copy()
+                    if not filled_staff.empty
+                    else pd.DataFrame()
                 )
-                pick_idx = seat_labels.index(pick_label) if pick_label in seat_labels else 0
-                pick_code = seat_codes[pick_idx]
-                cur = editable.iloc[pick_idx]
-                has_manual = pick_code in seat_ov
-                if has_manual:
-                    st.caption("На этом месте уже есть ручная правка статуса.")
+                if editable.empty:
+                    st.info("Нет мест, по которым можно править статус.")
+                else:
+                    seat_labels = []
+                    seat_codes = []
+                    for _, row in editable.iterrows():
+                        code = str(row.get("Код") or "")
+                        label = (
+                            f"{code} · {row.get('Должность') or ''} · "
+                            f"{row.get('ФИО') or ''} · сейчас: {row.get('Статус') or ''}"
+                        )
+                        seat_labels.append(label)
+                        seat_codes.append(code)
+                    pick_label = st.selectbox(
+                        "Место",
+                        seat_labels,
+                        key="admin_status_seat",
+                    )
+                    pick_idx = seat_labels.index(pick_label) if pick_label in seat_labels else 0
+                    pick_code = seat_codes[pick_idx]
+                    cur = editable.iloc[pick_idx]
+                    has_manual = pick_code in seat_ov
+                    if has_manual:
+                        st.caption("На этом месте уже есть ручная правка статуса.")
 
-                new_status = st.selectbox(
-                    "Статус",
-                    ["✅ Сдал", "⚫ 0%", "❌ Не сдал"],
-                    index=["✅ Сдал", "⚫ 0%", "❌ Не сдал"].index(
-                        str(cur.get("Статус") or "❌ Не сдал")
+                    new_status = st.selectbox(
+                        "Статус",
+                        ["✅ Сдал", "⚫ 0%", "❌ Не сдал"],
+                        index=["✅ Сдал", "⚫ 0%", "❌ Не сдал"].index(
+                            str(cur.get("Статус") or "❌ Не сдал")
+                        )
+                        if str(cur.get("Статус") or "") in {"✅ Сдал", "⚫ 0%", "❌ Не сдал"}
+                        else 2,
+                        key="admin_status_value",
                     )
-                    if str(cur.get("Статус") or "") in {"✅ Сдал", "⚫ 0%", "❌ Не сдал"}
-                    else 2,
-                    key="admin_status_value",
-                )
-                new_kpi = st.number_input(
-                    "KPI %",
-                    min_value=0.0,
-                    max_value=100.0,
-                    value=float(cur.get("KPI") or 0),
-                    step=1.0,
-                    key="admin_status_kpi",
-                    disabled=new_status != "✅ Сдал",
-                )
-                c1, c2 = st.columns(2)
-                if c1.button("Сохранить статус", type="primary", key="admin_save_status"):
-                    try:
-                        with st.spinner("Сохраняю…"):
-                            upsert_seat_override(
-                                pick_code,
-                                new_status,
-                                kpi=new_kpi if new_status == "✅ Сдал" else 0.0,
-                                window_day=selected_day,
-                            )
-                        st.success("Статус сохранён.")
-                        st.rerun()
-                    except Exception as exc:
-                        st.error(f"Не удалось сохранить: `{exc}`")
-                if c2.button(
-                    "Сбросить ручную правку",
-                    key="admin_clear_status",
-                    disabled=not has_manual,
-                ):
-                    try:
-                        with st.spinner("Сбрасываю…"):
-                            clear_seat_override(pick_code, window_day=selected_day)
-                        st.success("Ручная правка снята.")
-                        st.rerun()
-                    except Exception as exc:
-                        st.error(f"Не удалось сбросить: `{exc}`")
+                    new_kpi = st.number_input(
+                        "KPI %",
+                        min_value=0.0,
+                        max_value=100.0,
+                        value=float(cur.get("KPI") or 0),
+                        step=1.0,
+                        key="admin_status_kpi",
+                        disabled=new_status != "✅ Сдал",
+                    )
+                    c1, c2 = st.columns(2)
+                    if c1.button("Сохранить статус", type="primary", key="admin_save_status"):
+                        try:
+                            with st.spinner("Сохраняю…"):
+                                upsert_seat_override(
+                                    pick_code,
+                                    new_status,
+                                    kpi=new_kpi if new_status == "✅ Сдал" else 0.0,
+                                    window_day=selected_day_for_admin,
+                                )
+                            st.success("Статус сохранён.")
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(f"Не удалось сохранить: `{exc}`")
+                    if c2.button(
+                        "Сбросить ручную правку",
+                        key="admin_clear_status",
+                        disabled=not has_manual,
+                    ):
+                        try:
+                            with st.spinner("Сбрасываю…"):
+                                clear_seat_override(
+                                    pick_code, window_day=selected_day_for_admin
+                                )
+                            st.success("Ручная правка снята.")
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(f"Не удалось сбросить: `{exc}`")
 
         with tab_staff:
             if staffing.empty:
@@ -626,59 +826,64 @@ if _admin_unlocked:
                         st.error(f"Не удалось обновить штатку: `{exc}`")
 
         with tab_excel:
-            st.caption("Прямые строки Excel-слоя дня (имя из файла отчёта).")
-            if not df.empty and "Сотрудник" in df.columns:
-                options = []
-                for _, row in df.iterrows():
-                    name = str(row.get("Сотрудник") or "")
-                    fname = str(row.get("Файл") or "")
-                    kpi = row.get("KPI")
-                    label = f"{name} · KPI {kpi}" + (f" · {fname}" if fname else "")
-                    options.append((label, name))
-                labels = [o[0] for o in options]
-                picked = st.multiselect(
-                    "Удалить записи",
-                    labels,
-                    placeholder="например ofis-administrator…",
-                    key="admin_excel_del",
-                )
-                if st.button("Удалить выбранные", type="secondary", key="admin_excel_del_btn"):
-                    names = [name for label, name in options if label in picked]
-                    if not names:
-                        st.warning("Ничего не выбрано.")
-                    else:
+            if not selected_day_for_admin:
+                st.info("Выберите день в календаре, чтобы править Excel-записи дня.")
+            else:
+                st.caption("Прямые строки Excel-слоя дня (имя из файла отчёта).")
+                if not df.empty and "Сотрудник" in df.columns:
+                    options = []
+                    for _, row in df.iterrows():
+                        name = str(row.get("Сотрудник") or "")
+                        fname = str(row.get("Файл") or "")
+                        kpi = row.get("KPI")
+                        label = f"{name} · KPI {kpi}" + (f" · {fname}" if fname else "")
+                        options.append((label, name))
+                    labels = [o[0] for o in options]
+                    picked = st.multiselect(
+                        "Удалить записи",
+                        labels,
+                        placeholder="например ofis-administrator…",
+                        key="admin_excel_del",
+                    )
+                    if st.button("Удалить выбранные", type="secondary", key="admin_excel_del_btn"):
+                        names = [name for label, name in options if label in picked]
+                        if not names:
+                            st.warning("Ничего не выбрано.")
+                        else:
+                            try:
+                                with st.spinner("Удаляю…"):
+                                    _, meta_del = remove_employees_from_day(
+                                        names, window_day=selected_day_for_admin
+                                    )
+                                st.success(f"Удалено: {meta_del.get('removed', 0)}")
+                                st.rerun()
+                            except Exception as exc:
+                                st.error(f"Не удалось удалить: `{exc}`")
+                else:
+                    st.caption("За выбранный день Excel-записей нет.")
+
+                with st.form("admin_excel_add"):
+                    st.markdown("**Добавить строку вручную**")
+                    add_name = st.text_input("Сотрудник / имя из файла")
+                    add_kpi = st.number_input(
+                        "KPI %", min_value=0.0, max_value=100.0, value=0.0
+                    )
+                    add_file = st.text_input("Файл", value="(admin)")
+                    if st.form_submit_button("Добавить", type="primary"):
                         try:
-                            with st.spinner("Удаляю…"):
-                                _, meta_del = remove_employees_from_day(
-                                    names, window_day=selected_day
+                            with st.spinner("Добавляю…"):
+                                admin_upsert_employee(
+                                    add_name,
+                                    kpi=add_kpi,
+                                    file_name=add_file,
+                                    window_day=selected_day_for_admin,
                                 )
-                            st.success(f"Удалено: {meta_del.get('removed', 0)}")
+                            st.success("Добавлено.")
                             st.rerun()
                         except Exception as exc:
-                            st.error(f"Не удалось удалить: `{exc}`")
-            else:
-                st.caption("За выбранный день Excel-записей нет.")
+                            st.error(f"Не удалось добавить: `{exc}`")
 
-            with st.form("admin_excel_add"):
-                st.markdown("**Добавить строку вручную**")
-                add_name = st.text_input("Сотрудник / имя из файла")
-                add_kpi = st.number_input("KPI %", min_value=0.0, max_value=100.0, value=0.0)
-                add_file = st.text_input("Файл", value="(admin)")
-                if st.form_submit_button("Добавить", type="primary"):
-                    try:
-                        with st.spinner("Добавляю…"):
-                            admin_upsert_employee(
-                                add_name,
-                                kpi=add_kpi,
-                                file_name=add_file,
-                                window_day=selected_day,
-                            )
-                        st.success("Добавлено.")
-                        st.rerun()
-                    except Exception as exc:
-                        st.error(f"Не удалось добавить: `{exc}`")
-
-bits = [f"День: {selected_day.strftime('%d.%m.%Y')}"]
+bits = [view_title]
 if shared_meta.get("updated_at"):
     bits.append(f"Обновлено: {shared_meta['updated_at']}")
 if not staffing.empty:
@@ -835,6 +1040,38 @@ else:
     )
 
 st.markdown('<p class="akela-section-label">Сводка по загруженным %</p>', unsafe_allow_html=True)
+
+# Вложенные отчёты периода (неделя/день внутри месяца или дни внутри недели)
+if view_mode == "month" and (nested_weekly or nested_daily):
+    st.markdown(
+        '<p class="akela-section-label">Внутри месяца</p>', unsafe_allow_html=True
+    )
+    if nested_weekly:
+        with st.expander(f"Недельные отчёты ({len(nested_weekly)})", expanded=False):
+            for wkey, wdf in nested_weekly:
+                try:
+                    ws, we = parse_week_id(wkey)
+                    label = f"{wkey} · {ws.strftime('%d.%m')}–{we.strftime('%d.%m')}"
+                except Exception:
+                    label = wkey
+                st.markdown(f"**{label}** · записей: {len(wdf)}")
+                show = [c for c in ["Сотрудник", "KPI", "Категория", "Файл"] if c in wdf.columns]
+                st.dataframe(wdf[show], use_container_width=True, hide_index=True)
+    if nested_daily:
+        with st.expander(f"Дневные отчёты ({len(nested_daily)})", expanded=False):
+            for d, ddf in nested_daily:
+                st.markdown(f"**{d.strftime('%d.%m.%Y')}** · записей: {len(ddf)}")
+                show = [c for c in ["Сотрудник", "KPI", "Категория", "Файл"] if c in ddf.columns]
+                st.dataframe(ddf[show], use_container_width=True, hide_index=True)
+elif view_mode == "week" and nested_daily:
+    st.markdown(
+        '<p class="akela-section-label">Дни этой недели</p>', unsafe_allow_html=True
+    )
+    with st.expander(f"Дневные отчёты ({len(nested_daily)})", expanded=True):
+        for d, ddf in nested_daily:
+            st.markdown(f"**{d.strftime('%d.%m.%Y')}** · записей: {len(ddf)}")
+            show = [c for c in ["Сотрудник", "KPI", "Категория", "Файл"] if c in ddf.columns]
+            st.dataframe(ddf[show], use_container_width=True, hide_index=True)
 
 if not has_uploads and _admin_unlocked:
     st.caption("Пока нет загруженных Excel — статистика: 100% не сдали.")

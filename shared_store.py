@@ -13,7 +13,19 @@ import requests
 from dotenv import load_dotenv
 
 from bitrix_api import bitrix_call, bitrix_call_full
-from schedule import active_window_day, bitrix_target_day, is_fetch_window, now_tashkent, can_upload_for_day
+from schedule import (
+    active_window_day,
+    bitrix_target_day,
+    is_fetch_window,
+    now_tashkent,
+    can_upload_for_day,
+    week_id,
+    month_id,
+    week_start,
+    week_end,
+    parse_week_id,
+    parse_month_id,
+)
 from utils import kpi_category
 
 STORAGE_ID = 3
@@ -84,8 +96,10 @@ def _download_file_bytes(file_meta: dict) -> bytes:
 def _empty_store() -> dict:
     return {
         "timezone": "Asia/Tashkent",
-        "version": 2,
+        "version": 3,
         "days": {},
+        "weeks": {},
+        "months": {},
         "staffing_overrides": {},
     }
 
@@ -104,10 +118,62 @@ def _save_meta(saved: dict, disk_meta: dict, **extra: Any) -> dict[str, Any]:
     }
 
 
+def _ensure_period_buckets(store: dict) -> dict:
+    store.setdefault("days", {})
+    store.setdefault("weeks", {})
+    store.setdefault("months", {})
+    store.setdefault("staffing_overrides", store.get("staffing_overrides") or {})
+    return store
+
+
+def _period_bucket(store: dict, kind: str) -> dict:
+    _ensure_period_buckets(store)
+    if kind == "day":
+        return store["days"]
+    if kind == "week":
+        return store["weeks"]
+    if kind == "month":
+        return store["months"]
+    raise RuntimeError(f"Неизвестный тип периода: {kind}")
+
+
+def period_key(kind: str, ref: date) -> str:
+    kind = (kind or "day").strip().lower()
+    if kind == "day":
+        return ref.isoformat()
+    if kind == "week":
+        return week_id(ref)
+    if kind == "month":
+        return month_id(ref)
+    raise RuntimeError(f"Неизвестный тип периода: {kind}")
+
+
+def _period_label(kind: str, key: str) -> str:
+    if kind == "day":
+        try:
+            return date.fromisoformat(key).strftime("%d.%m.%Y")
+        except Exception:
+            return key
+    if kind == "week":
+        try:
+            ws, we = parse_week_id(key)
+            return f"неделя {key} ({ws.strftime('%d.%m')}–{we.strftime('%d.%m.%Y')})"
+        except Exception:
+            return key
+    if kind == "month":
+        try:
+            y, m = parse_month_id(key)
+            return date(y, m, 1).strftime("%m.%Y")
+        except Exception:
+            return key
+    return key
+
+
 def _migrate_payload(payload: dict) -> dict:
     """Старый формат {employees:[...]} → days[active]."""
     if "days" in payload and isinstance(payload["days"], dict):
-        return payload
+        store = dict(payload)
+        return _ensure_period_buckets(store)
     store = _empty_store()
     employees = payload.get("employees") or []
     if employees:
@@ -248,26 +314,205 @@ def list_available_days(store: dict | None = None) -> list[date]:
 
 def load_day(window_day: date | None = None) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Загрузить снимок за слот (без скачивания из Битрикс)."""
+    return load_period("day", window_day or active_window_day())
+
+
+def list_available_weeks(store: dict | None = None) -> list[str]:
+    if store is None:
+        store, _ = _load_raw_store()
+    keys = []
+    for key, slot in (store.get("weeks") or {}).items():
+        if slot.get("employees") or slot.get("seat_overrides"):
+            keys.append(str(key))
+    return sorted(keys, reverse=True)
+
+
+def list_available_months(store: dict | None = None) -> list[str]:
+    if store is None:
+        store, _ = _load_raw_store()
+    keys = []
+    for key, slot in (store.get("months") or {}).items():
+        if slot.get("employees") or slot.get("seat_overrides"):
+            keys.append(str(key))
+    return sorted(keys, reverse=True)
+
+
+def load_period(kind: str, ref: date | str) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """
+    kind: day | week | month
+    ref: date или готовый ключ (2026-08-11 / 2026-W33 / 2026-08)
+    """
     store, disk_meta = _load_raw_store()
-    day = window_day or active_window_day()
-    key = day.isoformat()
-    slot = (store.get("days") or {}).get(key) or {}
+    kind = (kind or "day").strip().lower()
+    if isinstance(ref, str) and ref.strip():
+        key = ref.strip()
+        if kind == "day":
+            anchor = date.fromisoformat(key)
+        elif kind == "week":
+            anchor, _ = parse_week_id(key)
+        else:
+            y, m = parse_month_id(key)
+            anchor = date(y, m, 1)
+    else:
+        anchor = ref if isinstance(ref, date) else active_window_day()
+        key = period_key(kind, anchor)
+
+    bucket = _period_bucket(store, kind)
+    slot = bucket.get(key) or {}
     df = _employees_to_df(slot.get("employees") or [])
     seat_overrides = slot.get("seat_overrides") or {}
     if not isinstance(seat_overrides, dict):
         seat_overrides = {}
     return df, {
         **disk_meta,
-        "window_day": key,
-        "bitrix_day": slot.get("bitrix_day") or bitrix_target_day(day).isoformat(),
+        "period_kind": kind,
+        "period_key": key,
+        "period_label": _period_label(kind, key),
+        "window_day": key if kind == "day" else (slot.get("window_day") or key),
+        "bitrix_day": slot.get("bitrix_day")
+        or (bitrix_target_day(anchor).isoformat() if kind == "day" else None),
         "updated_at": slot.get("updated_at"),
         "frozen": bool(slot.get("frozen")),
         "frozen_at": slot.get("frozen_at"),
         "count": len(df),
         "seat_overrides": seat_overrides,
         "available_days": [d.isoformat() for d in list_available_days(store)],
-        "can_fetch": is_fetch_window() and day == active_window_day(),
+        "available_weeks": list_available_weeks(store),
+        "available_months": list_available_months(store),
+        "can_fetch": kind == "day" and is_fetch_window() and anchor == active_window_day(),
+        "anchor_date": anchor.isoformat(),
     }
+
+
+def days_in_week_with_data(week_key: str, store: dict | None = None) -> list[date]:
+    if store is None:
+        store, _ = _load_raw_store()
+    try:
+        ws, we = parse_week_id(week_key)
+    except Exception:
+        return []
+    out = []
+    for d in list_available_days(store):
+        if ws <= d <= we:
+            out.append(d)
+    return sorted(out, reverse=True)
+
+
+def days_in_month_with_data(month_key: str, store: dict | None = None) -> list[date]:
+    if store is None:
+        store, _ = _load_raw_store()
+    try:
+        y, m = parse_month_id(month_key)
+    except Exception:
+        return []
+    out = []
+    for d in list_available_days(store):
+        if d.year == y and d.month == m:
+            out.append(d)
+    return sorted(out, reverse=True)
+
+
+def weeks_in_month_with_data(month_key: str, store: dict | None = None) -> list[str]:
+    if store is None:
+        store, _ = _load_raw_store()
+    try:
+        y, m = parse_month_id(month_key)
+    except Exception:
+        return []
+    from schedule import weeks_in_month
+
+    month_weeks = {w for w, _, _ in weeks_in_month(y, m)}
+    found: set[str] = set()
+    for w in list_available_weeks(store):
+        if w in month_weeks:
+            found.add(w)
+    for d in days_in_month_with_data(month_key, store):
+        found.add(week_id(d))
+    return sorted(found, reverse=True)
+
+
+def publish_period_snapshot(
+    incoming_df: pd.DataFrame,
+    kind: str,
+    ref: date | None = None,
+    replace: bool = True,
+    allow_outside_window: bool = False,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """
+    Сохранить снимок периода.
+    day — прежние правила окна; week/month — без окна 16–20 (отдельные отчёты).
+    """
+    kind = (kind or "day").strip().lower()
+    anchor = ref or active_window_day()
+    if kind == "day":
+        return publish_day_snapshot(
+            incoming_df,
+            window_day=anchor,
+            replace=replace,
+            allow_outside_window=allow_outside_window,
+        )
+
+    store, disk_meta = _load_raw_store()
+    _ensure_period_buckets(store)
+    key = period_key(kind, anchor)
+    bucket = _period_bucket(store, kind)
+    existing_slot = bucket.get(key) or {}
+    now_s = _utc_now()
+    employees = _df_to_employees(incoming_df)
+
+    if not replace and key in bucket:
+        old = _employees_to_df(bucket[key].get("employees") or [])
+        incoming = incoming_df.copy()
+        if "Обновлено" not in incoming.columns:
+            incoming["Обновлено"] = now_s
+        old["_key"] = (
+            old["Сотрудник"].astype(str).str.strip().str.casefold()
+            if not old.empty
+            else pd.Series(dtype=str)
+        )
+        incoming["_key"] = incoming["Сотрудник"].astype(str).str.strip().str.casefold()
+        if not old.empty:
+            old = old[~old["_key"].isin(set(incoming["_key"]))]
+            merged = pd.concat([old, incoming], ignore_index=True).drop(
+                columns=["_key"], errors="ignore"
+            )
+        else:
+            merged = incoming.drop(columns=["_key"], errors="ignore")
+        employees = _df_to_employees(merged)
+
+    preserved_overrides = existing_slot.get("seat_overrides") or {}
+    if not isinstance(preserved_overrides, dict):
+        preserved_overrides = {}
+
+    bucket[key] = {
+        "period_kind": kind,
+        "period_key": key,
+        "window_day": key,
+        "employees": employees,
+        "updated_at": now_s,
+        "frozen": False,
+        "seat_overrides": preserved_overrides,
+        "anchor_date": anchor.isoformat(),
+        "week_start": week_start(anchor).isoformat() if kind == "week" else None,
+        "week_end": week_end(anchor).isoformat() if kind == "week" else None,
+    }
+    store.setdefault("staffing_overrides", store.get("staffing_overrides") or {})
+    saved = save_store(store, disk_meta.get("file_id"), disk_meta.get("folder_id"))
+    df = _employees_to_df(employees)
+    return df, _save_meta(
+        saved,
+        disk_meta,
+        period_kind=kind,
+        period_key=key,
+        period_label=_period_label(kind, key),
+        updated_at=now_s,
+        frozen=False,
+        count=len(df),
+        seat_overrides=preserved_overrides,
+        available_days=[d.isoformat() for d in list_available_days(store)],
+        available_weeks=list_available_weeks(store),
+        available_months=list_available_months(store),
+    )
 
 
 def freeze_day_if_needed(store: dict, window_day: date) -> bool:
