@@ -1272,6 +1272,33 @@ submit_stats = pd.DataFrame(
 submit_stats = submit_stats[submit_stats["Количество"] > 0]
 submit_colors = {ok_label: "#22A06B", submit_label: "#1A1A1A"}
 
+
+def _plotly_selection_points(event) -> list:
+    if event is None:
+        return []
+    sel = getattr(event, "selection", None)
+    if sel is None and isinstance(event, dict):
+        sel = event.get("selection") or event.get("select")
+    if sel is None:
+        return []
+    pts = getattr(sel, "points", None)
+    if pts is None and isinstance(sel, dict):
+        pts = sel.get("points")
+    return list(pts or [])
+
+
+def _plotly_chart_select(fig, *, key: str):
+    kwargs = dict(use_container_width=True, key=key)
+    try:
+        return st.plotly_chart(
+            fig, on_select="rerun", selection_mode="points", **kwargs
+        )
+    except TypeError:
+        return st.plotly_chart(fig, **kwargs)
+
+
+st.caption(t(lang, "drill_hint"))
+
 with col1:
     pie = px.pie(
         submit_stats,
@@ -1282,9 +1309,22 @@ with col1:
         color="Статус",
         color_discrete_map=submit_colors,
     )
-    pie.update_traces(textposition="inside", textinfo="percent+label", textfont_size=12)
-    pie.update_layout(**PLOTLY_LAYOUT, showlegend=False)
-    st.plotly_chart(pie, use_container_width=True)
+    pie.update_traces(
+        textposition="outside",
+        textinfo="percent+label",
+        textfont_size=12,
+        textfont_color="#1A2332",
+        pull=[0.02] * len(submit_stats),
+    )
+    pie.update_layout(
+        **PLOTLY_LAYOUT,
+        showlegend=True,
+        legend=dict(orientation="h", y=-0.12),
+        margin=dict(l=16, r=16, t=48, b=48),
+        uniformtext_minsize=10,
+        uniformtext_mode="hide",
+    )
+    ev_submit = _plotly_chart_select(pie, key="pie_submit_click")
 
 with col2:
     stats = chart_df["Категория"].value_counts().reindex(cat_order).dropna().reset_index()
@@ -1301,9 +1341,97 @@ with col2:
         color="Категория",
         color_discrete_map=cat_colors,
     )
-    pie2.update_traces(textposition="inside", textinfo="percent+label", textfont_size=12)
-    pie2.update_layout(**PLOTLY_LAYOUT, showlegend=False)
-    st.plotly_chart(pie2, use_container_width=True)
+    pie2.update_traces(
+        textposition="outside",
+        textinfo="percent+label",
+        textfont_size=12,
+        textfont_color="#1A2332",
+        pull=[0.02] * len(stats),
+    )
+    pie2.update_layout(
+        **PLOTLY_LAYOUT,
+        showlegend=True,
+        legend=dict(orientation="h", y=-0.12),
+        margin=dict(l=16, r=16, t=48, b=56),
+        uniformtext_minsize=10,
+        uniformtext_mode="hide",
+    )
+    ev_cats = _plotly_chart_select(pie2, key="pie_cats_click")
+
+# ---- разбор клика по диаграмме → список мест ----
+drill_kind = None  # "ok" | "bad" | category label
+for pt in _plotly_selection_points(ev_submit):
+    lab = str(pt.get("label") or pt.get("name") or "").strip()
+    if lab == ok_label or lab in {"✅ Сдали", "✅ Сдал", "✅ Topshirdi", "✅ Submitted"}:
+        drill_kind = "ok"
+        break
+    if lab == submit_label or lab in {"❌ Не сдали", "❌ Не сдал", "❌ Topshirmadi", "❌ Missing"}:
+        drill_kind = "bad"
+        break
+if drill_kind is None:
+    for pt in _plotly_selection_points(ev_cats):
+        lab = str(pt.get("label") or pt.get("name") or "").strip()
+        if lab in cat_order:
+            drill_kind = lab
+            break
+
+# запасной UX: кнопки сегментов (если клик по pie не сработал)
+fb1, fb2, fb3 = st.columns([1, 1, 1.2])
+with fb1:
+    if st.button(ok_label, key="drill_btn_ok", use_container_width=True):
+        st.session_state.chart_drill = "ok"
+        st.rerun()
+with fb2:
+    if st.button(submit_label, key="drill_btn_bad", use_container_width=True):
+        st.session_state.chart_drill = "bad"
+        st.rerun()
+with fb3:
+    if st.button(t(lang, "drill_clear"), key="drill_btn_clear", use_container_width=True):
+        st.session_state.chart_drill = None
+        st.rerun()
+
+if drill_kind is not None:
+    st.session_state.chart_drill = drill_kind
+drill = st.session_state.get("chart_drill")
+
+if drill and not filled_staff.empty:
+    st.markdown(
+        f'<p class="akela-section-label">{t(lang, "drill_seats")}</p>',
+        unsafe_allow_html=True,
+    )
+    drill_view = filled_staff[filled_staff["Статус"] != "➖ Не обязан"].copy()
+    if drill == "ok":
+        drill_view = drill_view[drill_view["Статус"] != "❌ Не сдал"]
+    elif drill == "bad":
+        drill_view = drill_view[drill_view["Статус"] == "❌ Не сдал"]
+    else:
+        # категория KPI
+        if "Категория" not in drill_view.columns:
+            drill_view["Категория"] = drill_view["KPI"].map(
+                lambda x: kpi_category(float(x) if x is not None and str(x) != "" else None)
+            )
+        drill_view = drill_view[drill_view["Категория"] == drill]
+    show_d = [
+        c
+        for c in ["№", "Код", "Должность", "ФИО", "Статус", "KPI", "Категория", "Файл"]
+        if c in drill_view.columns
+    ]
+    st.caption(f"{drill} · {len(drill_view)}")
+    st.dataframe(drill_view[show_d], use_container_width=True, hide_index=True)
+elif drill and has_uploads and not chart_df.empty:
+    st.markdown(
+        f'<p class="akela-section-label">{t(lang, "drill_seats")}</p>',
+        unsafe_allow_html=True,
+    )
+    if drill == "ok":
+        drill_view = chart_df[chart_df["KPI"] > 0]
+    elif drill == "bad":
+        drill_view = chart_df[chart_df["KPI"] <= 0]
+    else:
+        drill_view = chart_df[chart_df["Категория"] == drill]
+    show_d = [c for c in ["Сотрудник", "KPI", "Категория", "Файл"] if c in drill_view.columns]
+    st.caption(f"{drill} · {len(drill_view)}")
+    st.dataframe(drill_view[show_d], use_container_width=True, hide_index=True)
 
 if not has_uploads:
     if _admin_unlocked:
@@ -1313,8 +1441,8 @@ if not has_uploads:
 sort_cols = st.columns([2.2, 1.2])
 with sort_cols[0]:
     st.markdown(
-        '<p style="font-family:Unbounded,sans-serif;font-size:0.95rem;'
-        'color:#3E4197;margin:0.85rem 0 0.35rem;">Сотрудники по % норматива</p>',
+        f'<p style="font-family:Unbounded,sans-serif;font-size:0.95rem;'
+        f'color:#3E4197;margin:0.85rem 0 0.35rem;">{t(lang, "people_chart")}</p>',
         unsafe_allow_html=True,
     )
 with sort_cols[1]:
@@ -1326,13 +1454,13 @@ with sort_cols[1]:
             "По процентам: с низкого",
         ],
         label_visibility="collapsed",
+        key="people_sort_mode",
     )
 
 ordered = df.copy()
 ordered["_sort_name"] = ordered["Сотрудник"].astype(str).str.strip().str.casefold()
 
 if sort_mode == "По алфавиту":
-    # А → Б → В … сверху вниз
     ordered = ordered.sort_values(["_sort_name", "Сотрудник"], ascending=[True, True])
 elif sort_mode == "По процентам: с высокого":
     ordered = ordered.sort_values(["KPI", "_sort_name"], ascending=[False, True])
@@ -1341,7 +1469,6 @@ else:
 
 ordered = ordered.drop(columns=["_sort_name"])
 names_top_to_bottom = ordered["Сотрудник"].tolist()
-# Plotly: categoryarray идёт снизу вверх → разворачиваем
 names_bottom_to_top = list(reversed(names_top_to_bottom))
 
 people = px.bar(
@@ -1354,22 +1481,39 @@ people = px.bar(
     color_discrete_map=cat_colors,
     category_orders={"Категория": cat_order},
 )
-people.update_traces(texttemplate="%{x:.1f}%", textposition="outside", cliponaxis=False)
+# текст % всегда снаружи + запас справа, чтобы не обрезался
+people.update_traces(
+    texttemplate="%{x:.1f}%",
+    textposition="outside",
+    textfont=dict(color="#1A2332", size=12, family="Onest, sans-serif"),
+    cliponaxis=False,
+    insidetextanchor="middle",
+)
 layout = {k: v for k, v in PLOTLY_LAYOUT.items() if k != "title"}
-layout["margin"] = dict(l=24, r=48, t=16, b=24)
+layout["margin"] = dict(l=12, r=80, t=16, b=24)
+xmax = float(ordered["KPI"].max()) if not ordered.empty else 100.0
 people.update_layout(
     **layout,
     title=None,
     showlegend=True,
-    height=max(360, 28 * len(ordered) + 80),
+    legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
+    height=max(360, 32 * len(ordered) + 100),
+    bargap=0.25,
 )
-people.update_xaxes(showgrid=True, gridcolor="rgba(26,35,50,0.08)", title="", range=[0, 110])
+people.update_xaxes(
+    showgrid=True,
+    gridcolor="rgba(26,35,50,0.08)",
+    title="",
+    range=[0, max(120.0, xmax * 1.18 + 8)],
+    ticksuffix="%",
+)
 people.update_yaxes(
     showgrid=False,
     title="",
     categoryorder="array",
     categoryarray=names_bottom_to_top,
     autorange=True,
+    tickfont=dict(size=12, color="#1A2332"),
 )
 st.plotly_chart(people, use_container_width=True)
 
