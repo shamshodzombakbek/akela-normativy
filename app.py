@@ -184,32 +184,22 @@ html, body, [class*="css"] {
   margin-bottom: 0.6rem;
 }
 .akela-logo-sm img { max-width: 132px !important; }
-.cal-wrap {
-  width: 100%;
-  max-width: 360px;
-  margin: 0 auto;
-}
-.cal-center {
-  width: 100%;
-  max-width: 420px;
-  margin: 0 auto;
-}
 .lang-center {
-  text-align: center;
-  margin: 0.4rem auto 0.85rem;
+  text-align: right;
+  margin: 0;
 }
 .lang-row {
   display: inline-flex;
-  gap: 12px;
+  gap: 8px;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-end;
 }
 .lang-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 48px;
-  height: 48px;
+  width: 34px;
+  height: 34px;
   border-radius: 50%;
   border: 2px solid #D5E0EA;
   text-decoration: none !important;
@@ -231,9 +221,18 @@ html, body, [class*="css"] {
   width: 100%;
   height: 100%;
   display: block;
-  /* растягиваем флаг, чтобы круг был заполнен */
   object-fit: cover;
   transform: scale(1.35);
+}
+.cal-center {
+  width: 100%;
+  max-width: 360px;
+  margin: 0 auto;
+}
+.cal-wrap {
+  width: 100%;
+  max-width: 360px;
+  margin: 0 auto;
 }
 .cal-grid {
   display: grid;
@@ -604,9 +603,10 @@ try:
 except Exception as exc:
     shared_error = str(exc)
 
-# ---- шапка: логотип, по центру язык (круглые флаги) и календарь ----
-logo_c, _, _ = st.columns([1.2, 2.0, 1.2])
-with logo_c:
+# ---- шапка: логотип | календарь по центру | флаги справа ----
+top_logo, top_cal, top_lang = st.columns([1.15, 2.5, 1.0])
+
+with top_logo:
     if LOGO_PATH.exists():
         st.image(str(LOGO_PATH), width=96 if _mobile else 132)
     st.caption(t(lang, "subtitle"))
@@ -616,7 +616,6 @@ def _lang_href(code: str) -> str:
     params: dict[str, str] = {"lang": code}
     if _admin_unlocked and _admin_token:
         params["admin"] = _admin_token
-    # сохраняем текущий вид календаря
     if st.session_state.get("cal_day") is not None:
         params["cal_day"] = st.session_state.cal_day.isoformat()
     elif st.session_state.get("cal_week"):
@@ -626,7 +625,6 @@ def _lang_href(code: str) -> str:
     return "?" + urlencode(params)
 
 
-# круглые SVG-флаги по центру — клик по флагу, без кнопок снизу
 flag_svg_full = {
     "uz": (
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 200" preserveAspectRatio="xMidYMid slice">'
@@ -663,121 +661,118 @@ for code in ("uz", "ru", "en"):
         f'<a class="lang-btn{active}" href="{_lang_href(code)}" target="_self" '
         f'title="{code.upper()}">{flag_svg_full[code]}</a>'
     )
-st.markdown(
-    f'<div class="lang-center">'
-    f'<p class="akela-section-label" style="margin:0 0 0.55rem">{t(lang, "lang")}</p>'
-    f'<div class="lang-row">{"".join(flag_btns)}</div>'
-    f"</div>",
-    unsafe_allow_html=True,
-)
 
-# календарь по центру
-st.markdown('<div class="cal-center">', unsafe_allow_html=True)
-st.markdown(
-    f'<p class="akela-section-label" style="margin:0.15rem 0 0.45rem;text-align:center">'
-    f'{t(lang, "calendar")}</p>',
-    unsafe_allow_html=True,
-)
-nav_l, nav_c, nav_r = st.columns([1, 4, 1])
-with nav_l:
-    if st.button("←", use_container_width=True, key="cal_prev"):
-        m = st.session_state.cal_month - 1
-        y = st.session_state.cal_year
-        if m < 1:
-            m, y = 12, y - 1
-        st.session_state.cal_month = m
-        st.session_state.cal_year = y
-        st.session_state.cal_week = None
-        st.session_state.cal_day = None
-        for k in ("cal_day", "cal_week", "cal_view"):
-            if k in st.query_params:
-                del st.query_params[k]
-        st.rerun()
-with nav_c:
-    month_label = f"{month_name(lang, st.session_state.cal_month)} {st.session_state.cal_year}"
-    month_view_active = (
-        st.session_state.cal_week is None and st.session_state.cal_day is None
+with top_lang:
+    st.markdown(
+        f'<div class="lang-center"><div class="lang-row">{"".join(flag_btns)}</div></div>',
+        unsafe_allow_html=True,
     )
-    if st.button(
-        month_label,
-        use_container_width=True,
-        key="cal_month_title",
-        type="primary" if month_view_active else "secondary",
-    ):
-        st.session_state.cal_week = None
-        st.session_state.cal_day = None
-        for k in ("cal_day", "cal_week", "cal_view"):
-            if k in st.query_params:
-                del st.query_params[k]
-        st.rerun()
-with nav_r:
-    if st.button("→", use_container_width=True, key="cal_next"):
-        m = st.session_state.cal_month + 1
-        y = st.session_state.cal_year
-        if m > 12:
-            m, y = 1, y + 1
-        st.session_state.cal_month = m
-        st.session_state.cal_year = y
-        st.session_state.cal_week = None
-        st.session_state.cal_day = None
-        for k in ("cal_day", "cal_week", "cal_view"):
-            if k in st.query_params:
-                del st.query_params[k]
-        st.rerun()
 
-cal_y, cal_m = st.session_state.cal_year, st.session_state.cal_month
-month_key = f"{cal_y:04d}-{cal_m:02d}"
-data_days_set = {d for d in available_days if d.year == cal_y and d.month == cal_m}
-
-
-def _cal_href(**extra: str) -> str:
-    params: dict[str, str] = {"lang": lang}
-    if _admin_unlocked and _admin_token:
-        params["admin"] = _admin_token
-    params.update({k: str(v) for k, v in extra.items() if v is not None})
-    return "?" + urlencode(params)
-
-
-wd = weekday_labels(lang)
-cells: list[str] = []
-cells.append(f'<div class="cal-head">{t(lang, "week_col")}</div>')
-for lab in wd:
-    cells.append(f'<div class="cal-head">{lab}</div>')
-
-for wid, ws, we in weeks_in_month(cal_y, cal_m):
-    week_sel = st.session_state.cal_week == wid and st.session_state.cal_day is None
-    wcls = "cal-cell selected" if week_sel else "cal-cell"
-    cells.append(
-        f'<a class="{wcls}" href="{_cal_href(cal_week=wid)}" target="_self" '
-        f'title="{ws.strftime("%d.%m")}–{we.strftime("%d.%m")}">'
-        f'{wid.split("-W")[-1]}</a>'
+with top_cal:
+    st.markdown(
+        f'<p class="akela-section-label" style="margin:0 0 0.35rem;text-align:center">'
+        f'{t(lang, "calendar")}</p>',
+        unsafe_allow_html=True,
     )
-    cur = ws
-    for _ in range(7):
-        in_month = cur.month == cal_m and cur.year == cal_y
-        if not in_month:
-            cells.append('<div class="cal-cell muted">·</div>')
-        else:
-            has_data = cur in data_days_set
-            is_sel = st.session_state.cal_day == cur
-            cls = "cal-cell"
-            if has_data:
-                cls += " has-data"
-            if is_sel:
-                cls += " selected"
-            cells.append(
-                f'<a class="{cls}" href="{_cal_href(cal_day=cur.isoformat())}" '
-                f'target="_self">{cur.day}</a>'
-            )
-        cur += timedelta(days=1)
+    nav_l, nav_c, nav_r = st.columns([1, 4, 1])
+    with nav_l:
+        if st.button("←", use_container_width=True, key="cal_prev"):
+            m = st.session_state.cal_month - 1
+            y = st.session_state.cal_year
+            if m < 1:
+                m, y = 12, y - 1
+            st.session_state.cal_month = m
+            st.session_state.cal_year = y
+            st.session_state.cal_week = None
+            st.session_state.cal_day = None
+            for k in ("cal_day", "cal_week", "cal_view"):
+                if k in st.query_params:
+                    del st.query_params[k]
+            st.rerun()
+    with nav_c:
+        month_label = f"{month_name(lang, st.session_state.cal_month)} {st.session_state.cal_year}"
+        month_view_active = (
+            st.session_state.cal_week is None and st.session_state.cal_day is None
+        )
+        if st.button(
+            month_label,
+            use_container_width=True,
+            key="cal_month_title",
+            type="primary" if month_view_active else "secondary",
+        ):
+            st.session_state.cal_week = None
+            st.session_state.cal_day = None
+            for k in ("cal_day", "cal_week", "cal_view"):
+                if k in st.query_params:
+                    del st.query_params[k]
+            st.rerun()
+    with nav_r:
+        if st.button("→", use_container_width=True, key="cal_next"):
+            m = st.session_state.cal_month + 1
+            y = st.session_state.cal_year
+            if m > 12:
+                m, y = 1, y + 1
+            st.session_state.cal_month = m
+            st.session_state.cal_year = y
+            st.session_state.cal_week = None
+            st.session_state.cal_day = None
+            for k in ("cal_day", "cal_week", "cal_view"):
+                if k in st.query_params:
+                    del st.query_params[k]
+            st.rerun()
 
-st.markdown(
-    '<div class="cal-wrap"><div class="cal-grid">'
-    + "".join(cells)
-    + "</div></div>",
-    unsafe_allow_html=True,
-)
-# клики по флагам и дням — всегда в том же окне
+    cal_y, cal_m = st.session_state.cal_year, st.session_state.cal_month
+    month_key = f"{cal_y:04d}-{cal_m:02d}"
+    data_days_set = {d for d in available_days if d.year == cal_y and d.month == cal_m}
+
+    def _cal_href(**extra: str) -> str:
+        params: dict[str, str] = {"lang": lang}
+        if _admin_unlocked and _admin_token:
+            params["admin"] = _admin_token
+        params.update({k: str(v) for k, v in extra.items() if v is not None})
+        return "?" + urlencode(params)
+
+    wd = weekday_labels(lang)
+    cells: list[str] = []
+    cells.append(f'<div class="cal-head">{t(lang, "week_col")}</div>')
+    for lab in wd:
+        cells.append(f'<div class="cal-head">{lab}</div>')
+
+    for wid, ws, we in weeks_in_month(cal_y, cal_m):
+        week_sel = st.session_state.cal_week == wid and st.session_state.cal_day is None
+        wcls = "cal-cell selected" if week_sel else "cal-cell"
+        cells.append(
+            f'<a class="{wcls}" href="{_cal_href(cal_week=wid)}" target="_self" '
+            f'title="{ws.strftime("%d.%m")}–{we.strftime("%d.%m")}">'
+            f'{wid.split("-W")[-1]}</a>'
+        )
+        cur = ws
+        for _ in range(7):
+            in_month = cur.month == cal_m and cur.year == cal_y
+            if not in_month:
+                cells.append('<div class="cal-cell muted">·</div>')
+            else:
+                has_data = cur in data_days_set
+                is_sel = st.session_state.cal_day == cur
+                cls = "cal-cell"
+                if has_data:
+                    cls += " has-data"
+                if is_sel:
+                    cls += " selected"
+                cells.append(
+                    f'<a class="{cls}" href="{_cal_href(cal_day=cur.isoformat())}" '
+                    f'target="_self">{cur.day}</a>'
+                )
+            cur += timedelta(days=1)
+
+    st.markdown(
+        '<div class="cal-wrap"><div class="cal-grid">'
+        + "".join(cells)
+        + "</div></div>",
+        unsafe_allow_html=True,
+    )
+    st.caption(t(lang, "cal_hint"))
+
 components.html(
     """
     <script>
@@ -802,8 +797,6 @@ components.html(
     """,
     height=0,
 )
-st.caption(t(lang, "cal_hint"))
-st.markdown("</div>", unsafe_allow_html=True)
 
 cal_y, cal_m = st.session_state.cal_year, st.session_state.cal_month
 month_key = f"{cal_y:04d}-{cal_m:02d}"
