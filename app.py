@@ -799,7 +799,7 @@ def _render_lang_flags() -> None:
         unsafe_allow_html=True,
     )
     lf = st.columns(3)
-    flag_px = 34 if _mobile else 40
+    flag_px = 24 if _mobile else 40
     for i, code in enumerate(("uz", "ru", "en")):
         with lf[i]:
             active = lang == code
@@ -807,7 +807,7 @@ def _render_lang_flags() -> None:
             shadow = "0 0 0 2px rgba(62,65,151,0.25)" if active else "none"
             src = f"data:image/svg+xml,{quote(_flag_svgs[code])}"
             st.markdown(
-                f'<div style="text-align:center;margin:0 0 0.2rem">'
+                f'<div style="text-align:center;margin:0 0 {"0.1rem" if _mobile else "0.2rem"}">'
                 f'<img src="{src}" alt="{code.upper()}" width="{flag_px}" height="{flag_px}" '
                 f'style="width:{flag_px}px;height:{flag_px}px;border-radius:50%;border:2px solid {border};'
                 f'box-shadow:{shadow};display:block;margin:0 auto;object-fit:cover;'
