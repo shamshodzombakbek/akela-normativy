@@ -1279,34 +1279,32 @@ submit_stats = pd.DataFrame(
 )
 submit_stats = submit_stats[submit_stats["Количество"] > 0]
 submit_colors = {ok_label: "#22A06B", submit_label: "#1A1A1A"}
+_pie_layout = {k: v for k, v in PLOTLY_LAYOUT.items() if k not in {"margin", "title"}}
 
 
-def _plotly_selection_points(event) -> list:
-    if event is None:
-        return []
-    sel = getattr(event, "selection", None)
-    if sel is None and isinstance(event, dict):
-        sel = event.get("selection") or event.get("select")
-    if sel is None:
-        return []
-    pts = getattr(sel, "points", None)
-    if pts is None and isinstance(sel, dict):
-        pts = sel.get("points")
-    return list(pts or [])
-
-
-def _plotly_chart_select(fig, *, key: str):
-    kwargs = dict(
-        use_container_width=True,
-        key=key,
-        config={"displayModeBar": False, "scrollZoom": False},
-    )
-    try:
-        return st.plotly_chart(
-            fig, on_select="rerun", selection_mode="points", **kwargs
-        )
-    except TypeError:
-        return st.plotly_chart(fig, **kwargs)
+def _map_drill_label(lab: str) -> str | None:
+    lab = (lab or "").strip()
+    if not lab:
+        return None
+    if lab in {"ok", "bad"} or lab in cat_order:
+        return lab
+    if lab == ok_label or lab in {
+        "✅ Сдали",
+        "✅ Сдал",
+        "✅ Topshirdi",
+        "✅ Submitted",
+    }:
+        return "ok"
+    if lab == submit_label or lab in {
+        "❌ Не сдали",
+        "❌ Не сдал",
+        "❌ Topshirmadi",
+        "❌ Missing",
+    }:
+        return "bad"
+    if lab in cat_order:
+        return lab
+    return None
 
 
 def _scroll_to_drill():
@@ -1319,7 +1317,7 @@ def _scroll_to_drill():
           if (el) {
             setTimeout(function () {
               el.scrollIntoView({ behavior: "smooth", block: "start" });
-            }, 120);
+            }, 180);
           }
         })();
         </script>
@@ -1327,6 +1325,77 @@ def _scroll_to_drill():
         height=0,
     )
 
+
+def _clickable_pie(fig, *, key: str, height: int = 380) -> None:
+    """Pie with real plotly_click — Streamlit on_select does not work on pies."""
+    fig.update_layout(height=height, autosize=True)
+    fig_json = fig.to_json()
+    # id must be a valid CSS selector without dots/emojis
+    dom_id = "".join(ch if ch.isalnum() else "_" for ch in key)
+    html = f"""
+<!DOCTYPE html>
+<html><head>
+<meta charset="utf-8"/>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<style>
+  html, body {{ margin:0; padding:0; background:transparent; overflow:hidden; }}
+  .wrap {{
+    transition: transform 0.28s ease, box-shadow 0.28s ease;
+    transform-origin: center center;
+    border-radius: 2px;
+    padding: 4px;
+  }}
+  .wrap:hover {{
+    transform: scale(1.05);
+    box-shadow: 0 14px 36px rgba(26,35,50,0.16);
+  }}
+  #{dom_id} {{ width: 100%; height: {height}px; cursor: pointer; }}
+</style>
+</head><body>
+<div class="wrap"><div id="{dom_id}"></div></div>
+<script>
+const fig = {fig_json};
+const layout = Object.assign({{}}, fig.layout || {{}}, {{
+  paper_bgcolor: "rgba(0,0,0,0)",
+  plot_bgcolor: "rgba(0,0,0,0)",
+  height: {height},
+  autosize: true
+}});
+Plotly.newPlot("{dom_id}", fig.data, layout, {{
+  displayModeBar: false,
+  responsive: true,
+  staticPlot: false
+}}).then(function(gd) {{
+  gd.on("plotly_click", function(data) {{
+    if (!data || !data.points || !data.points.length) return;
+    const p = data.points[0];
+    const label = (p.label || p.name || "").toString();
+    if (!label) return;
+    const u = new URL(window.parent.location.href);
+    u.searchParams.set("drill", label);
+    u.searchParams.set("drill_go", "1");
+    window.parent.location.href = u.toString();
+  }});
+}});
+</script>
+</body></html>
+"""
+    components.html(html, height=height + 16, scrolling=False)
+
+
+# query-param drill from pie click
+_just_clicked = str(st.query_params.get("drill_go") or "") == "1"
+if "drill" in st.query_params:
+    mapped = _map_drill_label(str(st.query_params.get("drill") or ""))
+    if mapped:
+        st.session_state.chart_drill = mapped
+if _just_clicked:
+    st.session_state["_scroll_drill"] = True
+    if "drill_go" in st.query_params:
+        try:
+            del st.query_params["drill_go"]
+        except Exception:
+            pass
 
 with col1:
     pie = px.pie(
@@ -1347,7 +1416,6 @@ with col1:
         hovertemplate="<b>%{label}</b><br>%{percent}<br>%{value}<extra></extra>",
         hoverlabel=dict(bgcolor="#ffffff", font_size=15, font_color="#1A2332"),
     )
-    _pie_layout = {k: v for k, v in PLOTLY_LAYOUT.items() if k not in {"margin", "title"}}
     pie.update_layout(
         **_pie_layout,
         showlegend=True,
@@ -1355,7 +1423,7 @@ with col1:
         margin=dict(l=16, r=16, t=48, b=48),
         hovermode="closest",
     )
-    ev_submit = _plotly_chart_select(pie, key="pie_submit_click")
+    _clickable_pie(pie, key="pie_submit_click", height=380)
 
 with col2:
     stats = chart_df["Категория"].value_counts().reindex(cat_order).dropna().reset_index()
@@ -1388,27 +1456,8 @@ with col2:
         margin=dict(l=16, r=16, t=48, b=56),
         hovermode="closest",
     )
-    ev_cats = _plotly_chart_select(pie2, key="pie_cats_click")
+    _clickable_pie(pie2, key="pie_cats_click", height=380)
 
-# ---- клик по сегменту → список мест + прокрутка вниз ----
-drill_kind = None  # "ok" | "bad" | category label
-for pt in _plotly_selection_points(ev_submit):
-    lab = str(pt.get("label") or pt.get("name") or "").strip()
-    if lab == ok_label or lab in {"✅ Сдали", "✅ Сдал", "✅ Topshirdi", "✅ Submitted"}:
-        drill_kind = "ok"
-        break
-    if lab == submit_label or lab in {"❌ Не сдали", "❌ Не сдал", "❌ Topshirmadi", "❌ Missing"}:
-        drill_kind = "bad"
-        break
-if drill_kind is None:
-    for pt in _plotly_selection_points(ev_cats):
-        lab = str(pt.get("label") or pt.get("name") or "").strip()
-        if lab in cat_order:
-            drill_kind = lab
-            break
-
-if drill_kind is not None:
-    st.session_state.chart_drill = drill_kind
 drill = st.session_state.get("chart_drill")
 
 st.markdown(
@@ -1457,7 +1506,7 @@ elif drill and has_uploads and not chart_df.empty:
     st.caption(f"{drill} · {len(drill_view)}")
     st.dataframe(drill_view[show_d], use_container_width=True, hide_index=True)
 
-if showed_drill and drill_kind is not None:
+if showed_drill and st.session_state.pop("_scroll_drill", False):
     _scroll_to_drill()
 
 if not has_uploads:
