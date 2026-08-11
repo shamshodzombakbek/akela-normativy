@@ -675,6 +675,15 @@ if "cal_week" in st.query_params and "cal_day" not in st.query_params:
 if st.query_params.get("cal_view") == "month":
     st.session_state.cal_week = None
     st.session_state.cal_day = None
+if "cal_year" in st.query_params and "cal_month" in st.query_params:
+    try:
+        _cy = int(str(st.query_params.get("cal_year")))
+        _cm = int(str(st.query_params.get("cal_month")))
+        if 2000 <= _cy <= 2100 and 1 <= _cm <= 12:
+            st.session_state.cal_year = _cy
+            st.session_state.cal_month = _cm
+    except Exception:
+        pass
 
 shared_error = None
 available_days: list = []
@@ -685,11 +694,11 @@ except Exception as exc:
     shared_error = str(exc)
 
 # ---- шапка: логотип | календарь по центру | флаги справа ----
-top_logo, top_cal, top_lang = st.columns([0.95, 1.45, 0.85])
+top_logo, top_cal, top_lang = st.columns([1.0, 1.55, 0.9])
 
 with top_logo:
     if LOGO_PATH.exists():
-        st.image(str(LOGO_PATH), width=72 if _mobile else 96)
+        st.image(str(LOGO_PATH), width=72 if _mobile else 100)
     st.caption(t(lang, "subtitle"))
 
 _flag_svgs = {
@@ -721,166 +730,195 @@ _flag_svgs = {
         "</svg>"
     ),
 }
-_flag_css_uris = {
-    code: f'url("data:image/svg+xml,{quote(svg)}")' for code, svg in _flag_svgs.items()
-}
-st.markdown(
-    f"""
-<style>
-div[data-testid="column"]:has(.lang-flags) div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:nth-child(1) button {{
-  background-image: {_flag_css_uris["uz"]} !important;
-}}
-div[data-testid="column"]:has(.lang-flags) div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:nth-child(2) button {{
-  background-image: {_flag_css_uris["ru"]} !important;
-}}
-div[data-testid="column"]:has(.lang-flags) div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:nth-child(3) button {{
-  background-image: {_flag_css_uris["en"]} !important;
-}}
-div[data-testid="column"]:has(.lang-flags) button[data-testid="baseButton-primary"] {{
-  /* сохраняем SVG флага и на активной кнопке */
-  background-color: transparent !important;
-}}
-</style>
-""",
-    unsafe_allow_html=True,
-)
 
 with top_lang:
     st.markdown(
-        f'<p class="akela-section-label" style="margin:0 0 0.15rem;text-align:center">'
+        f'<p class="akela-section-label" style="margin:0 0 0.2rem;text-align:center">'
         f'{t(lang, "lang")}</p>',
         unsafe_allow_html=True,
     )
-    st.markdown('<div class="lang-flags"></div>', unsafe_allow_html=True)
-    lf = st.columns(3)
-    for i, code in enumerate(("uz", "ru", "en")):
-        with lf[i]:
-            if st.button(
-                code.upper(),
-                key=f"lang_{code}",
-                use_container_width=True,
-                type="primary" if lang == code else "secondary",
-            ):
-                if code != lang:
-                    st.session_state.lang = code
-                    st.query_params["lang"] = code
-                    st.rerun()
+    _flag_btns = []
+    for code in ("uz", "ru", "en"):
+        act = " active" if lang == code else ""
+        _flag_btns.append(
+            f'<button type="button" class="lang-btn{act}" data-lang="{code}" aria-label="{code.upper()}">'
+            f"{_flag_svgs[code]}</button>"
+        )
+    components.html(
+        f"""
+<style>
+  html,body {{ margin:0; padding:0; background:transparent; }}
+  .wrap {{ display:flex; gap:8px; justify-content:center; align-items:center; }}
+  .lang-btn {{
+    width:34px; height:34px; border-radius:50%; border:2px solid #D5E0EA;
+    padding:0; overflow:hidden; cursor:pointer; background:#fff;
+    display:inline-flex; align-items:center; justify-content:center;
+  }}
+  .lang-btn.active {{ border-color:#3E4197; box-shadow:0 0 0 2px rgba(62,65,151,.25); }}
+  .lang-btn svg {{ width:100%; height:100%; display:block; transform:scale(1.35); pointer-events:none; }}
+</style>
+<div class="wrap">{"".join(_flag_btns)}</div>
+<script>
+(function() {{
+  function go(lang) {{
+    try {{
+      const u = new URL(window.parent.location.href);
+      u.searchParams.set('lang', lang);
+      window.parent.location.href = u.toString();
+    }} catch (e) {{}}
+  }}
+  document.querySelectorAll('button[data-lang]').forEach(function(btn) {{
+    btn.addEventListener('click', function(ev) {{
+      ev.preventDefault();
+      go(btn.getAttribute('data-lang'));
+    }});
+  }});
+}})();
+</script>
+""",
+        height=46,
+    )
 
 with top_cal:
-    st.markdown(
-        f'<p class="akela-section-label" style="margin:0 0 0.1rem;text-align:center">'
-        f'{t(lang, "calendar")}</p>',
-        unsafe_allow_html=True,
-    )
-    st.markdown('<div class="akela-cal-nav"></div>', unsafe_allow_html=True)
-    nav_l, nav_c, nav_r = st.columns([0.7, 3.6, 0.7])
-    with nav_l:
-        if st.button("‹", use_container_width=True, key="cal_prev"):
-            m = st.session_state.cal_month - 1
-            y = st.session_state.cal_year
-            if m < 1:
-                m, y = 12, y - 1
-            st.session_state.cal_month = m
-            st.session_state.cal_year = y
-            st.session_state.cal_week = None
-            st.session_state.cal_day = None
-            for k in ("cal_day", "cal_week", "cal_view"):
-                if k in st.query_params:
-                    del st.query_params[k]
-            st.rerun()
-    with nav_c:
-        month_label = f"{month_name(lang, st.session_state.cal_month)} {st.session_state.cal_year}"
-        month_view_active = (
-            st.session_state.cal_week is None and st.session_state.cal_day is None
-        )
-        if st.button(
-            month_label,
-            use_container_width=True,
-            key="cal_month_title",
-            type="primary" if month_view_active else "secondary",
-        ):
-            st.session_state.cal_week = None
-            st.session_state.cal_day = None
-            for k in ("cal_day", "cal_week", "cal_view"):
-                if k in st.query_params:
-                    del st.query_params[k]
-            st.rerun()
-    with nav_r:
-        if st.button("›", use_container_width=True, key="cal_next"):
-            m = st.session_state.cal_month + 1
-            y = st.session_state.cal_year
-            if m > 12:
-                m, y = 1, y + 1
-            st.session_state.cal_month = m
-            st.session_state.cal_year = y
-            st.session_state.cal_week = None
-            st.session_state.cal_day = None
-            for k in ("cal_day", "cal_week", "cal_view"):
-                if k in st.query_params:
-                    del st.query_params[k]
-            st.rerun()
-
     cal_y, cal_m = st.session_state.cal_year, st.session_state.cal_month
     month_key = f"{cal_y:04d}-{cal_m:02d}"
     data_days_set = {d for d in available_days if d.year == cal_y and d.month == cal_m}
-
-    st.markdown('<div class="akela-cal-panel cal-wrap"></div>', unsafe_allow_html=True)
+    sel_day = st.session_state.cal_day
+    sel_week = st.session_state.cal_week
+    month_label = f"{month_name(lang, cal_m)} {cal_y}"
     wd = weekday_labels(lang)
-    st.markdown(
-        '<div class="cal-head-row">'
-        f'<span>{t(lang, "week_col")[:1]}</span>'
-        + "".join(f"<span>{lab[:2]}</span>" for lab in wd)
-        + "</div>",
-        unsafe_allow_html=True,
-    )
 
+    # prev/next month
+    _pm, _py = (cal_m - 1, cal_y)
+    if _pm < 1:
+        _pm, _py = 12, cal_y - 1
+    _nm, _ny = (cal_m + 1, cal_y)
+    if _nm > 12:
+        _nm, _ny = 1, cal_y + 1
+
+    weeks_html = []
+    head = (
+        '<div class="row head"><span class="w">'
+        + (t(lang, "week_col")[:1])
+        + "</span>"
+        + "".join(f"<span>{lab[:2]}</span>" for lab in wd)
+        + "</div>"
+    )
     for wid, ws, we in weeks_in_month(cal_y, cal_m):
-        row = st.columns([0.7] + [1] * 7)
-        week_sel = st.session_state.cal_week == wid and st.session_state.cal_day is None
-        with row[0]:
-            if st.button(
-                wid.split("-W")[-1],
-                key=f"cal_w_{wid}",
-                use_container_width=True,
-                type="primary" if week_sel else "secondary",
-            ):
-                st.session_state.cal_week = wid
-                st.session_state.cal_day = None
-                for k in ("cal_day", "cal_week", "cal_view"):
-                    if k in st.query_params:
-                        del st.query_params[k]
-                st.rerun()
+        week_sel = sel_week == wid and sel_day is None
+        cells = [
+            f'<button type="button" class="cell week{" sel" if week_sel else ""}" data-week="{wid}">'
+            f'{wid.split("-W")[-1]}</button>'
+        ]
         cur = ws
         for di in range(7):
             in_month = cur.month == cal_m and cur.year == cal_y
-            with row[di + 1]:
-                if not in_month:
-                    st.button(
-                        "·",
-                        key=f"cal_pad_{wid}_{di}",
-                        use_container_width=True,
-                        disabled=True,
-                    )
-                else:
-                    has_data = cur in data_days_set
-                    is_sel = st.session_state.cal_day == cur
-                    if st.button(
-                        str(cur.day),
-                        key=f"cal_d_{cur.isoformat()}",
-                        use_container_width=True,
-                        type="primary" if is_sel else "secondary",
-                        help=("report" if has_data else None),
-                    ):
-                        st.session_state.cal_day = cur
-                        st.session_state.cal_week = week_id(cur)
-                        st.session_state.cal_year = cur.year
-                        st.session_state.cal_month = cur.month
-                        for k in ("cal_day", "cal_week", "cal_view"):
-                            if k in st.query_params:
-                                del st.query_params[k]
-                        st.rerun()
+            if not in_month:
+                cells.append('<span class="cell mute">·</span>')
+            else:
+                has = cur in data_days_set
+                is_sel = sel_day == cur
+                cls = "cell day"
+                if has:
+                    cls += " report"
+                if is_sel:
+                    cls += " sel"
+                cells.append(
+                    f'<button type="button" class="{cls}" data-day="{cur.isoformat()}">{cur.day}</button>'
+                )
             cur += timedelta(days=1)
-    st.caption(t(lang, "cal_hint"))
+        weeks_html.append('<div class="row">' + "".join(cells) + "</div>")
+
+    st.markdown(
+        f'<p class="akela-section-label" style="margin:0 0 0.15rem;text-align:center">'
+        f'{t(lang, "calendar")}</p>',
+        unsafe_allow_html=True,
+    )
+    components.html(
+        f"""
+<style>
+  html,body {{ margin:0; padding:0; background:transparent; font-family: Onest, system-ui, sans-serif; }}
+  .cal {{ width:100%; max-width:280px; margin:0 auto; }}
+  .nav {{ display:grid; grid-template-columns:28px 1fr 28px; gap:4px; margin-bottom:4px; }}
+  .nav button {{
+    height:24px; border:1px solid #D5E0EA; border-radius:4px; background:#EEF2F6;
+    color:#1A2332; font-size:11px; font-weight:600; cursor:pointer; padding:0;
+  }}
+  .nav button.month {{ background:#3E4197; color:#fff; border-color:#2A2D7A; }}
+  .row {{
+    display:grid; grid-template-columns:22px repeat(7, 1fr); gap:2px; margin-bottom:2px;
+  }}
+  .row.head span {{
+    text-align:center; font-size:9px; color:#7A8B9C; font-weight:600; line-height:14px;
+  }}
+  .cell {{
+    height:18px; border-radius:3px; border:1px solid transparent; background:#EEF2F6;
+    color:#1A2332; font-size:10px; font-weight:600; display:flex; align-items:center;
+    justify-content:center; padding:0; cursor:pointer; line-height:1; white-space:nowrap;
+  }}
+  button.cell {{ width:100%; }}
+  .cell.mute {{ background:transparent; color:#C5CDD6; cursor:default; }}
+  .cell.report {{ background:#C6F6D5; border-color:#1F7A4C; color:#14532d; }}
+  .cell.sel {{ background:#3E4197 !important; border-color:#2A2D7A !important; color:#fff !important; }}
+  .cell.week {{ background:#F4F7FA; font-size:9px; }}
+  .hint {{ margin-top:3px; font-size:10px; color:#7A8B9C; text-align:center; }}
+</style>
+<div class="cal">
+  <div class="nav">
+    <button type="button" data-ym="{_py}-{_pm}">‹</button>
+    <button type="button" class="month" data-view-month="1">{month_label}</button>
+    <button type="button" data-ym="{_ny}-{_nm}">›</button>
+  </div>
+  {head}
+  {"".join(weeks_html)}
+  <div class="hint">{t(lang, "cal_hint")}</div>
+</div>
+<script>
+(function() {{
+  function go(setMap, delKeys) {{
+    try {{
+      const u = new URL(window.parent.location.href);
+      (delKeys || []).forEach(function(k) {{ u.searchParams.delete(k); }});
+      Object.keys(setMap || {{}}).forEach(function(k) {{
+        const v = setMap[k];
+        if (v === null || v === undefined || v === '') u.searchParams.delete(k);
+        else u.searchParams.set(k, v);
+      }});
+      window.parent.location.href = u.toString();
+    }} catch (e) {{}}
+  }}
+  document.querySelectorAll('button[data-ym]').forEach(function(btn) {{
+    btn.addEventListener('click', function(ev) {{
+      ev.preventDefault();
+      const parts = (btn.getAttribute('data-ym') || '').split('-');
+      if (parts.length !== 2) return;
+      go({{ cal_year: parts[0], cal_month: parts[1], cal_view: 'month' }}, ['cal_day', 'cal_week']);
+    }});
+  }});
+  document.querySelectorAll('button[data-view-month]').forEach(function(btn) {{
+    btn.addEventListener('click', function(ev) {{
+      ev.preventDefault();
+      go({{ cal_year: '{cal_y}', cal_month: '{cal_m}', cal_view: 'month' }}, ['cal_day', 'cal_week']);
+    }});
+  }});
+  document.querySelectorAll('button[data-day]').forEach(function(btn) {{
+    btn.addEventListener('click', function(ev) {{
+      ev.preventDefault();
+      go({{ cal_day: btn.getAttribute('data-day') }}, ['cal_week', 'cal_view']);
+    }});
+  }});
+  document.querySelectorAll('button[data-week]').forEach(function(btn) {{
+    btn.addEventListener('click', function(ev) {{
+      ev.preventDefault();
+      go({{ cal_week: btn.getAttribute('data-week') }}, ['cal_day', 'cal_view']);
+    }});
+  }});
+}})();
+</script>
+""",
+        height=168,
+    )
+
 
 
 
