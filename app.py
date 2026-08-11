@@ -329,9 +329,14 @@ div[data-testid="column"]:has(.akela-cal-root) button[data-testid="baseButton-pr
   color: #fff !important;
   background-image: none !important;
 }
-div[data-testid="column"]:has(.akela-cal-root) button[data-testid="baseButton-secondary"][aria-label*="report"],
-div[data-testid="column"]:has(.akela-cal-root) button[title*="report"],
-div[data-testid="column"]:has(.akela-cal-root) .stTooltipHoverTarget:has([aria-label*="report"]) button[data-testid="baseButton-secondary"] {
+div[data-testid="column"]:has(.akela-cal-root) button[data-testid="baseButton-secondary"][aria-label*="has-report"],
+div[data-testid="column"]:has(.akela-cal-root) button[title*="has-report"],
+div[data-testid="column"]:has(.akela-cal-root) .stTooltipHoverTarget:has([aria-label*="has-report"]) button[data-testid="baseButton-secondary"],
+div[data-testid="column"]:has(.akela-cal-root) .stTooltipHoverTarget:has([title*="has-report"]) button,
+/* запасной путь без :has — подсказка help=has-report */
+button[data-testid="baseButton-secondary"][aria-label*="has-report"],
+button[title*="has-report"],
+div[data-testid="stTooltipHoverTarget"]:has([aria-label*="has-report"]) button[data-testid="baseButton-secondary"] {
   background: #C6F6D5 !important;
   border: 1px solid #1F7A4C !important;
   color: #14532d !important;
@@ -732,119 +737,65 @@ _flag_svgs = {
         "</svg>"
     ),
 }
-_flag_css = {c: f'url("data:image/svg+xml,{quote(s)}")' for c, s in _flag_svgs.items()}
 
 with top_lang:
     st.markdown(
-        f'<p class="akela-section-label lang-flags-mark" style="margin:0 0 0.2rem;text-align:center">'
+        f'<p class="akela-section-label lang-flags-mark" style="margin:0 0 0.35rem;text-align:center">'
         f'{t(lang, "lang")}</p>',
         unsafe_allow_html=True,
     )
     lf = st.columns(3)
     for i, code in enumerate(("uz", "ru", "en")):
         with lf[i]:
+            active = lang == code
+            border = "#3E4197" if active else "#D5E0EA"
+            shadow = "0 0 0 2px rgba(62,65,151,0.25)" if active else "none"
+            src = f"data:image/svg+xml,{quote(_flag_svgs[code])}"
+            # SVG-картинка — флаги видны у всех (не emoji)
+            st.markdown(
+                f'<div style="text-align:center;margin:0 0 0.25rem">'
+                f'<img src="{src}" alt="{code.upper()}" width="40" height="40" '
+                f'style="width:40px;height:40px;border-radius:50%;border:2px solid {border};'
+                f'box-shadow:{shadow};display:block;margin:0 auto;object-fit:cover;'
+                f'background:#fff"/></div>',
+                unsafe_allow_html=True,
+            )
             if st.button(
                 code.upper(),
                 key=f"lang_{code}",
                 use_container_width=True,
-                type="primary" if lang == code else "secondary",
+                type="primary" if active else "secondary",
             ):
                 if code != lang:
                     st.session_state.lang = code
                     st.query_params["lang"] = code
                     st.rerun()
     st.markdown(
-        f"""
+        """
 <style>
-div[data-testid="column"]:has(.lang-flags-mark) div[data-testid="stHorizontalBlock"] {{
-  gap: 6px !important;
+div[data-testid="column"]:has(.lang-flags-mark) div[data-testid="stHorizontalBlock"] {
+  gap: 8px !important;
   justify-content: center !important;
-}}
-div[data-testid="column"]:has(.lang-flags-mark) div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {{
-  min-width: 36px !important;
-  flex: 0 0 36px !important;
-  width: 36px !important;
-  max-width: 36px !important;
-}}
-div[data-testid="column"]:has(.lang-flags-mark) .stButton {{ margin: 0 !important; }}
-div[data-testid="column"]:has(.lang-flags-mark) button {{
-  width: 36px !important;
-  height: 36px !important;
-  min-height: 36px !important;
-  max-height: 36px !important;
-  border-radius: 50% !important;
+}
+div[data-testid="column"]:has(.lang-flags-mark) div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
+  min-width: 44px !important;
+  flex: 0 0 44px !important;
+  width: 44px !important;
+  max-width: 52px !important;
+}
+div[data-testid="column"]:has(.lang-flags-mark) .stButton { margin: 0 !important; }
+div[data-testid="column"]:has(.lang-flags-mark) button {
+  min-height: 28px !important;
+  height: 28px !important;
   padding: 0 !important;
-  font-size: 0 !important;
-  line-height: 0 !important;
-  color: transparent !important;
+  font-size: 11px !important;
+  border-radius: 14px !important;
   box-shadow: none !important;
-  border: 2px solid #D5E0EA !important;
-  background: transparent !important;
-  background-size: cover !important;
-  background-position: center !important;
-  background-repeat: no-repeat !important;
   transform: none !important;
-  overflow: hidden !important;
-}}
-div[data-testid="column"]:has(.lang-flags-mark) div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:nth-child(1) button {{
-  background-image: {_flag_css["uz"]} !important;
-}}
-div[data-testid="column"]:has(.lang-flags-mark) div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:nth-child(2) button {{
-  background-image: {_flag_css["ru"]} !important;
-}}
-div[data-testid="column"]:has(.lang-flags-mark) div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:nth-child(3) button {{
-  background-image: {_flag_css["en"]} !important;
-}}
-div[data-testid="column"]:has(.lang-flags-mark) button[data-testid="baseButton-primary"],
-div[data-testid="column"]:has(.lang-flags-mark) button[kind="primary"] {{
-  border-color: #3E4197 !important;
-  box-shadow: 0 0 0 2px rgba(62,65,151,0.25) !important;
-}}
+}
 </style>
 """,
         unsafe_allow_html=True,
-    )
-    # JS fallback: круги + SVG по тексту UZ/RU/EN (видно у всех, не emoji)
-    import json as _json
-    _flag_js = _json.dumps({k: v for k, v in _flag_svgs.items()})
-    components.html(
-        f"""
-<script>
-(function(){{
-  try {{
-    var doc = window.parent.document;
-    var flags = {_flag_js};
-    function toUri(svg) {{
-      return 'url("data:image/svg+xml,' + encodeURIComponent(svg) + '")';
-    }}
-    function paint() {{
-      doc.querySelectorAll('button').forEach(function(btn) {{
-        var t = (btn.innerText || '').trim().toUpperCase();
-        if (t !== 'UZ' && t !== 'RU' && t !== 'EN') return;
-        var code = t.toLowerCase();
-        btn.style.borderRadius = '50%';
-        btn.style.width = '36px';
-        btn.style.height = '36px';
-        btn.style.minHeight = '36px';
-        btn.style.padding = '0';
-        btn.style.fontSize = '0';
-        btn.style.lineHeight = '0';
-        btn.style.color = 'transparent';
-        btn.style.overflow = 'hidden';
-        btn.style.backgroundImage = toUri(flags[code]);
-        btn.style.backgroundSize = 'cover';
-        btn.style.backgroundPosition = 'center';
-        btn.style.backgroundColor = 'transparent';
-      }});
-    }}
-    paint();
-    setTimeout(paint, 200);
-    setTimeout(paint, 700);
-  }} catch (e) {{}}
-}})();
-</script>
-""",
-        height=0,
     )
 
 
@@ -972,12 +923,14 @@ if st.session_state.show_calendar:
                     else:
                         has_data = cur in data_days_set
                         is_sel = sel_day == cur
+                        # « ∙» помечает день с отчётом — и для CSS/JS, и глазу чуть заметно
+                        day_label = f"{cur.day}∙" if (has_data and not is_sel) else str(cur.day)
                         if st.button(
-                            str(cur.day),
+                            day_label,
                             key=f"cal_d_{cur.isoformat()}",
                             use_container_width=True,
                             type="primary" if is_sel else "secondary",
-                            help=("report" if has_data else None),
+                            help=("has-report" if has_data else None),
                         ):
                             st.session_state.cal_day = cur
                             st.session_state.cal_week = week_id(cur)
@@ -988,6 +941,44 @@ if st.session_state.show_calendar:
                             st.rerun()
                 cur += timedelta(days=1)
         st.caption(t(lang, "cal_hint"))
+        # зелёный для дней с отчётом (на случай если CSS :has не сработал)
+        components.html(
+            """
+<script>
+(function(){
+  try {
+    var doc = window.parent.document;
+    function paint(){
+      doc.querySelectorAll('button').forEach(function(btn){
+        var txt = (btn.innerText || '');
+        var tip = (btn.getAttribute('aria-label') || '') + ' ' + (btn.getAttribute('title') || '');
+        var isPrimary = (btn.getAttribute('data-testid') || '').indexOf('primary') >= 0;
+        if (isPrimary) return;
+        if (txt.indexOf('∙') < 0 && tip.indexOf('has-report') < 0) return;
+        btn.style.background = '#C6F6D5';
+        btn.style.border = '1px solid #1F7A4C';
+        btn.style.color = '#14532d';
+      });
+      doc.querySelectorAll('[data-testid="stTooltipHoverTarget"]').forEach(function(wrap){
+        var tip = (wrap.getAttribute('aria-label') || '') + ' ' + (wrap.getAttribute('title') || '');
+        var btn = wrap.querySelector('button[data-testid="baseButton-secondary"]');
+        if (!btn) return;
+        var txt = (btn.innerText || '');
+        if (tip.indexOf('has-report') < 0 && txt.indexOf('∙') < 0) return;
+        btn.style.background = '#C6F6D5';
+        btn.style.border = '1px solid #1F7A4C';
+        btn.style.color = '#14532d';
+      });
+    }
+    paint();
+    setTimeout(paint, 200);
+    setTimeout(paint, 600);
+  } catch(e) {}
+})();
+</script>
+""",
+            height=0,
+        )
 
 
 
