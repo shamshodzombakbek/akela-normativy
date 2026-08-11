@@ -701,6 +701,38 @@ with top_logo:
         st.image(str(LOGO_PATH), width=72 if _mobile else 100)
     st.caption(t(lang, "subtitle"))
 
+
+def _app_base_url() -> str:
+    try:
+        if hasattr(st, "context") and getattr(st.context, "headers", None):
+            host = str(st.context.headers.get("Host") or "").strip()
+            proto = str(st.context.headers.get("X-Forwarded-Proto") or "https").split(",")[0].strip()
+            if host:
+                return f"{proto}://{host}/"
+    except Exception:
+        pass
+    # fallback: Streamlit Cloud app (чтобы iframe-ссылки не уходили на about:srcdoc)
+    return "https://akela-group-normativy.streamlit.app/"
+
+
+def _qp_href(**updates) -> str:
+    """Абсолютный URL приложения с query — клики из iframe через target=_parent."""
+    flat: dict[str, str] = {}
+    for k in st.query_params:
+        v = st.query_params.get(k)
+        if isinstance(v, list):
+            v = v[0] if v else ""
+        flat[str(k)] = str(v)
+    for k, v in updates.items():
+        if v is None:
+            flat.pop(str(k), None)
+        else:
+            flat[str(k)] = str(v)
+    q = urlencode(flat)
+    base = _app_base_url()
+    return f"{base}?{q}" if q else base
+
+
 _flag_emoji = {"uz": "🇺🇿", "ru": "🇷🇺", "en": "🇬🇧"}
 
 with top_lang:
@@ -709,7 +741,6 @@ with top_lang:
         f'{t(lang, "lang")}</p>',
         unsafe_allow_html=True,
     )
-    # Нативные кнопки Streamlit — клики всегда работают (iframe HTML на Cloud часто «глухой»)
     lf = st.columns(3)
     for i, code in enumerate(("uz", "ru", "en")):
         with lf[i]:
@@ -723,6 +754,38 @@ with top_lang:
                     st.session_state.lang = code
                     st.query_params["lang"] = code
                     st.rerun()
+    # круги + запасной JS (если :has не сработает)
+    components.html(
+        """
+<script>
+(function(){
+  try {
+    var doc = window.parent.document;
+    function paint(){
+      doc.querySelectorAll('button').forEach(function(btn){
+        var t = (btn.innerText || '').trim();
+        if (t !== '🇺🇿' && t !== '🇷🇺' && t !== '🇬🇧') return;
+        btn.style.borderRadius = '50%';
+        btn.style.width = '36px';
+        btn.style.height = '36px';
+        btn.style.minHeight = '36px';
+        btn.style.padding = '0';
+        btn.style.fontSize = '1.15rem';
+        btn.style.lineHeight = '1';
+        btn.style.overflow = 'hidden';
+        btn.style.boxShadow = (btn.getAttribute('data-testid')||'').indexOf('primary')>=0
+          ? '0 0 0 2px rgba(62,65,151,0.25)' : 'none';
+      });
+    }
+    paint();
+    setTimeout(paint, 200);
+    setTimeout(paint, 600);
+  } catch(e) {}
+})();
+</script>
+""",
+        height=0,
+    )
     st.markdown(
         """
 <style>
@@ -773,7 +836,6 @@ with top_cal:
     month_label = f"{month_name(lang, cal_m)} {cal_y}"
     wd = weekday_labels(lang)
 
-    # prev/next month
     _pm, _py = (cal_m - 1, cal_y)
     if _pm < 1:
         _pm, _py = 12, cal_y - 1
@@ -781,7 +843,16 @@ with top_cal:
     if _nm > 12:
         _nm, _ny = 1, cal_y + 1
 
-    weeks_html = []
+    href_prev = _qp_href(
+        cal_year=_py, cal_month=_pm, cal_view="month", cal_day=None, cal_week=None
+    )
+    href_next = _qp_href(
+        cal_year=_ny, cal_month=_nm, cal_view="month", cal_day=None, cal_week=None
+    )
+    href_month = _qp_href(
+        cal_year=cal_y, cal_month=cal_m, cal_view="month", cal_day=None, cal_week=None
+    )
+
     head = (
         '<div class="row head"><span class="w">'
         + (t(lang, "week_col")[:1])
@@ -789,11 +860,13 @@ with top_cal:
         + "".join(f"<span>{lab[:2]}</span>" for lab in wd)
         + "</div>"
     )
+    weeks_html = []
     for wid, ws, we in weeks_in_month(cal_y, cal_m):
         week_sel = sel_week == wid and sel_day is None
+        week_href = _qp_href(cal_week=wid, cal_day=None, cal_view=None)
         cells = [
-            f'<button type="button" class="cell week{" sel" if week_sel else ""}" data-week="{wid}">'
-            f'{wid.split("-W")[-1]}</button>'
+            f'<a class="cell week{" sel" if week_sel else ""}" href="{week_href}" target="_parent">'
+            f'{wid.split("-W")[-1]}</a>'
         ]
         cur = ws
         for di in range(7):
@@ -808,8 +881,11 @@ with top_cal:
                     cls += " report"
                 if is_sel:
                     cls += " sel"
+                day_href = _qp_href(
+                    cal_day=cur.isoformat(), cal_week=None, cal_view=None
+                )
                 cells.append(
-                    f'<button type="button" class="{cls}" data-day="{cur.isoformat()}">{cur.day}</button>'
+                    f'<a class="{cls}" href="{day_href}" target="_parent">{cur.day}</a>'
                 )
             cur += timedelta(days=1)
         weeks_html.append('<div class="row">' + "".join(cells) + "</div>")
@@ -825,11 +901,12 @@ with top_cal:
   html,body {{ margin:0; padding:0; background:transparent; font-family: Onest, system-ui, sans-serif; }}
   .cal {{ width:100%; max-width:280px; margin:0 auto; }}
   .nav {{ display:grid; grid-template-columns:28px 1fr 28px; gap:4px; margin-bottom:4px; }}
-  .nav button {{
+  .nav a {{
     height:24px; border:1px solid #D5E0EA; border-radius:4px; background:#EEF2F6;
     color:#1A2332; font-size:11px; font-weight:600; cursor:pointer; padding:0;
+    display:flex; align-items:center; justify-content:center; text-decoration:none !important;
   }}
-  .nav button.month {{ background:#3E4197; color:#fff; border-color:#2A2D7A; }}
+  .nav a.month {{ background:#3E4197; color:#fff; border-color:#2A2D7A; }}
   .row {{
     display:grid; grid-template-columns:22px repeat(7, 1fr); gap:2px; margin-bottom:2px;
   }}
@@ -840,8 +917,9 @@ with top_cal:
     height:18px; border-radius:3px; border:1px solid transparent; background:#EEF2F6;
     color:#1A2332; font-size:10px; font-weight:600; display:flex; align-items:center;
     justify-content:center; padding:0; cursor:pointer; line-height:1; white-space:nowrap;
+    text-decoration:none !important; box-sizing:border-box;
   }}
-  button.cell {{ width:100%; }}
+  a.cell {{ width:100%; }}
   .cell.mute {{ background:transparent; color:#C5CDD6; cursor:default; }}
   .cell.report {{ background:#C6F6D5; border-color:#1F7A4C; color:#14532d; }}
   .cell.sel {{ background:#3E4197 !important; border-color:#2A2D7A !important; color:#fff !important; }}
@@ -850,71 +928,14 @@ with top_cal:
 </style>
 <div class="cal">
   <div class="nav">
-    <button type="button" data-ym="{_py}-{_pm}">‹</button>
-    <button type="button" class="month" data-view-month="1">{month_label}</button>
-    <button type="button" data-ym="{_ny}-{_nm}">›</button>
+    <a href="{href_prev}" target="_parent">‹</a>
+    <a class="month" href="{href_month}" target="_parent">{month_label}</a>
+    <a href="{href_next}" target="_parent">›</a>
   </div>
   {head}
   {"".join(weeks_html)}
   <div class="hint">{t(lang, "cal_hint")}</div>
 </div>
-<script>
-(function() {{
-  function go(setMap, delKeys) {{
-    try {{
-      var parentWin = window.parent;
-      var href = parentWin.location.href;
-      var u = new URL(href);
-      (delKeys || []).forEach(function(k) {{ u.searchParams.delete(k); }});
-      Object.keys(setMap || {{}}).forEach(function(k) {{
-        var v = setMap[k];
-        if (v === null || v === undefined || v === '') u.searchParams.delete(k);
-        else u.searchParams.set(k, v);
-      }});
-      parentWin.location.assign(u.toString());
-    }} catch (e) {{
-      try {{
-        var q = [];
-        Object.keys(setMap || {{}}).forEach(function(k) {{
-          if (setMap[k] !== null && setMap[k] !== undefined && setMap[k] !== '')
-            q.push(encodeURIComponent(k) + '=' + encodeURIComponent(setMap[k]));
-        }});
-        window.top.location = '?' + q.join('&');
-      }} catch (e2) {{}}
-    }}
-  }}
-  document.querySelectorAll('button[data-ym]').forEach(function(btn) {{
-    btn.addEventListener('click', function(ev) {{
-      ev.preventDefault();
-      ev.stopPropagation();
-      var parts = (btn.getAttribute('data-ym') || '').split('-');
-      if (parts.length !== 2) return;
-      go({{ cal_year: parts[0], cal_month: parts[1], cal_view: 'month' }}, ['cal_day', 'cal_week']);
-    }});
-  }});
-  document.querySelectorAll('button[data-view-month]').forEach(function(btn) {{
-    btn.addEventListener('click', function(ev) {{
-      ev.preventDefault();
-      ev.stopPropagation();
-      go({{ cal_year: '{cal_y}', cal_month: '{cal_m}', cal_view: 'month' }}, ['cal_day', 'cal_week']);
-    }});
-  }});
-  document.querySelectorAll('button[data-day]').forEach(function(btn) {{
-    btn.addEventListener('click', function(ev) {{
-      ev.preventDefault();
-      ev.stopPropagation();
-      go({{ cal_day: btn.getAttribute('data-day') }}, ['cal_week', 'cal_view']);
-    }});
-  }});
-  document.querySelectorAll('button[data-week]').forEach(function(btn) {{
-    btn.addEventListener('click', function(ev) {{
-      ev.preventDefault();
-      ev.stopPropagation();
-      go({{ cal_week: btn.getAttribute('data-week') }}, ['cal_day', 'cal_view']);
-    }});
-  }});
-}})();
-</script>
 """,
         height=168,
     )
