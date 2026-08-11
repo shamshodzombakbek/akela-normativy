@@ -333,6 +333,8 @@ from shared_store import (
     list_available_months,
 )
 
+import streamlit.components.v1 as components
+
 # Plotly theme
 PLOTLY_LAYOUT = dict(
     paper_bgcolor="rgba(0,0,0,0)",
@@ -474,62 +476,129 @@ with top_cal:
     month_key = f"{cal_y:04d}-{cal_m:02d}"
     data_days_set = {d for d in available_days if d.year == cal_y and d.month == cal_m}
 
-    # компактная сетка кнопок: зелёный маркер · если есть отчёт
+    # компактный HTML-календарь (зелёные дни с отчётами), клик в том же окне
     wd = weekday_labels(lang)
-    head = st.columns([0.85] + [1] * 7)
-    head[0].caption(t(lang, "week_col"))
-    for i, lab in enumerate(wd):
-        head[i + 1].caption(lab)
+    admin_js = (
+        f'u.searchParams.set("admin", "{_admin_token}");'
+        if _admin_unlocked and _admin_token
+        else 'u.searchParams.delete("admin");'
+    )
+    cells: list[str] = []
+    cells.append(f'<div class="cal-head">{t(lang, "week_col")}</div>')
+    for lab in wd:
+        cells.append(f'<div class="cal-head">{lab}</div>')
 
     for wid, ws, we in weeks_in_month(cal_y, cal_m):
-        row = st.columns([0.85] + [1] * 7)
         week_sel = st.session_state.cal_week == wid and st.session_state.cal_day is None
-        with row[0]:
-            if st.button(
-                wid.split("-W")[-1],
-                key=f"cal_w_{wid}",
-                use_container_width=True,
-                type="primary" if week_sel else "secondary",
-                help=f"{ws.strftime('%d.%m')}–{we.strftime('%d.%m')}",
-            ):
-                st.session_state.cal_week = wid
-                st.session_state.cal_day = None
-                for k in ("cal_day", "cal_week", "cal_view"):
-                    if k in st.query_params:
-                        del st.query_params[k]
-                st.rerun()
+        wcls = "cal-cell selected" if week_sel else "cal-cell"
+        cells.append(
+            f'<button type="button" class="{wcls}" '
+            f'title="{ws.strftime("%d.%m")}–{we.strftime("%d.%m")}" '
+            f"onclick=\"pickWeek('{wid}')\">{wid.split('-W')[-1]}</button>"
+        )
         cur = ws
-        for di in range(7):
+        for _ in range(7):
             in_month = cur.month == cal_m and cur.year == cal_y
-            with row[di + 1]:
-                if not in_month:
-                    st.button(
-                        " ",
-                        key=f"cal_pad_{wid}_{di}",
-                        use_container_width=True,
-                        disabled=True,
-                    )
-                else:
-                    has_data = cur in data_days_set
-                    is_sel = st.session_state.cal_day == cur
-                    # дни с отчётами помечаем зелёным кружком в подписи
-                    label = f"{cur.day}" if not has_data else f"🟢{cur.day}"
-                    if st.button(
-                        label,
-                        key=f"cal_d_{cur.isoformat()}",
-                        use_container_width=True,
-                        type="primary" if is_sel else "secondary",
-                        help=("есть отчёт" if has_data else None),
-                    ):
-                        st.session_state.cal_day = cur
-                        st.session_state.cal_week = week_id(cur)
-                        st.session_state.cal_year = cur.year
-                        st.session_state.cal_month = cur.month
-                        for k in ("cal_day", "cal_week", "cal_view"):
-                            if k in st.query_params:
-                                del st.query_params[k]
-                        st.rerun()
+            if not in_month:
+                cells.append('<div class="cal-cell muted">·</div>')
+            else:
+                has_data = cur in data_days_set
+                is_sel = st.session_state.cal_day == cur
+                cls = "cal-cell"
+                if has_data:
+                    cls += " has-data"
+                if is_sel:
+                    cls += " selected"
+                iso = cur.isoformat()
+                cells.append(
+                    f'<button type="button" class="{cls}" '
+                    f"onclick=\"pickDay('{iso}')\">{cur.day}</button>"
+                )
             cur += timedelta(days=1)
+
+    cal_html = f"""
+<!DOCTYPE html>
+<html><head><meta charset="utf-8" />
+<style>
+  html, body {{ margin: 0; padding: 0; background: transparent; font-family: Onest, sans-serif; }}
+  .cal-wrap {{ max-width: 420px; }}
+  .cal-grid {{
+    display: grid;
+    grid-template-columns: 36px repeat(7, 1fr);
+    gap: 3px;
+    font-size: 12px;
+  }}
+  .cal-cell {{
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 28px;
+    border-radius: 4px;
+    color: #1A2332;
+    background: #EEF2F6;
+    border: 1px solid transparent;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 0;
+    font-family: inherit;
+    font-size: 12px;
+  }}
+  .cal-cell.has-data {{
+    background: #C6F6D5 !important;
+    border-color: #1F7A4C;
+    color: #14532d;
+  }}
+  .cal-cell.selected {{
+    background: #3E4197 !important;
+    color: #fff !important;
+    border-color: #2A2D7A;
+  }}
+  .cal-cell.muted {{
+    background: transparent;
+    color: transparent;
+    pointer-events: none;
+    border: none;
+  }}
+  .cal-head {{
+    text-align: center;
+    font-size: 10px;
+    color: #7A8B9C;
+    font-weight: 600;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }}
+  button.cal-cell:hover {{ filter: brightness(0.96); }}
+</style>
+</head><body>
+<script>
+function _nav(mut) {{
+  const u = new URL(window.parent.location.href);
+  mut(u);
+  u.searchParams.set("lang", "{lang}");
+  {admin_js}
+  window.parent.location.href = u.toString();
+}}
+function pickDay(iso) {{
+  _nav(function(u) {{
+    u.searchParams.set("cal_day", iso);
+    u.searchParams.delete("cal_week");
+    u.searchParams.delete("cal_view");
+  }});
+}}
+function pickWeek(wid) {{
+  _nav(function(u) {{
+    u.searchParams.set("cal_week", wid);
+    u.searchParams.delete("cal_day");
+    u.searchParams.delete("cal_view");
+  }});
+}}
+</script>
+<div class="cal-wrap"><div class="cal-grid">{"".join(cells)}</div></div>
+</body></html>
+"""
+    components.html(cal_html, height=200, scrolling=False)
     st.caption(t(lang, "cal_hint"))
 
 with top_lang:
