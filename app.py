@@ -125,16 +125,6 @@ html, body, [class*="css"] {
     font-size: 0.68rem !important;
   }
 
-  /* метрики и пары колонок: по 2 в ряд, не 4 узких */
-  div[data-testid="stHorizontalBlock"] {
-    flex-wrap: wrap !important;
-    gap: 0.45rem !important;
-  }
-  div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
-    min-width: calc(50% - 0.35rem) !important;
-    flex: 1 1 calc(50% - 0.35rem) !important;
-  }
-
   /* таблицы можно листать горизонтально */
   div[data-testid="stDataFrame"] {
     overflow-x: auto !important;
@@ -147,10 +137,9 @@ html, body, [class*="css"] {
     box-shadow: none !important;
   }
 
+  /* не трогаем кнопки шапки/календаря общим min-height */
   .stButton > button {
-    padding: 0.5rem 0.7rem !important;
     box-shadow: none !important;
-    min-height: 2.5rem !important;
   }
 
   div[role="radiogroup"] {
@@ -255,6 +244,12 @@ html, body, [class*="css"] {
   -webkit-tap-highlight-color: transparent;
 }
 a.cal-cell:hover { filter: brightness(0.96); color: inherit; }
+.cal-head {
+  text-align: center;
+  font-size: 10px;
+  color: #7A8B9C;
+  font-weight: 600;
+}
 .cal-cell.has-data {
   background: #C6F6D5 !important;
   border-color: #1F7A4C;
@@ -317,6 +312,36 @@ a.cal-cell:hover { filter: brightness(0.96); color: inherit; }
   }
 }
 
+.lang-flags div[data-testid="stHorizontalBlock"] {
+  gap: 8px !important;
+  flex-wrap: nowrap !important;
+  justify-content: flex-end !important;
+}
+.lang-flags div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
+  min-width: 34px !important;
+  flex: 0 0 34px !important;
+  width: 34px !important;
+}
+.lang-flags button[data-testid="baseButton-secondary"],
+.lang-flags button[data-testid="baseButton-primary"],
+.lang-flags .stButton > button {
+  width: 34px !important;
+  height: 34px !important;
+  min-height: 34px !important;
+  border-radius: 50% !important;
+  padding: 0 !important;
+  font-size: 0 !important;
+  color: transparent !important;
+  box-shadow: none !important;
+  overflow: hidden !important;
+  border: 2px solid #D5E0EA !important;
+  background-size: cover !important;
+  background-position: center !important;
+}
+.lang-flags button[data-testid="baseButton-primary"] {
+  border-color: #3E4197 !important;
+  box-shadow: 0 0 0 2px rgba(62,65,151,0.25) !important;
+}
 
 @keyframes rise {
   from { opacity: 0; transform: translateY(14px); }
@@ -651,21 +676,8 @@ with top_logo:
         st.image(str(LOGO_PATH), width=96 if _mobile else 132)
     st.caption(t(lang, "subtitle"))
 
-
-def _lang_href(code: str) -> str:
-    params: dict[str, str] = {"lang": code}
-    if _admin_unlocked and _admin_token:
-        params["admin"] = _admin_token
-    if st.session_state.get("cal_day") is not None:
-        params["cal_day"] = st.session_state.cal_day.isoformat()
-    elif st.session_state.get("cal_week"):
-        params["cal_week"] = st.session_state.cal_week
-    else:
-        params["cal_view"] = "month"
-    return "?" + urlencode(params)
-
-
-flag_svg_full = {
+# SVG-фоны для круглых кнопок языка (ставятся JS-ом по title)
+_flag_svg_b64 = {
     "uz": (
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 200" preserveAspectRatio="xMidYMid slice">'
         '<rect width="300" height="200" fill="#1EB53A"/>'
@@ -694,19 +706,24 @@ flag_svg_full = {
         "</svg>"
     ),
 }
-flag_btns = []
-for code in ("uz", "ru", "en"):
-    active = " active" if lang == code else ""
-    flag_btns.append(
-        f'<a class="lang-btn{active}" href="{_lang_href(code)}" target="_self" '
-        f'title="{code.upper()}">{flag_svg_full[code]}</a>'
-    )
 
 with top_lang:
-    st.markdown(
-        f'<div class="lang-center"><div class="lang-row">{"".join(flag_btns)}</div></div>',
-        unsafe_allow_html=True,
-    )
+    st.markdown('<div class="lang-flags">', unsafe_allow_html=True)
+    lf = st.columns(3)
+    for i, code in enumerate(("uz", "ru", "en")):
+        with lf[i]:
+            if st.button(
+                code.upper(),
+                key=f"lang_{code}",
+                use_container_width=True,
+                type="primary" if lang == code else "secondary",
+                help=f"lang-{code}",
+            ):
+                if code != lang:
+                    st.session_state.lang = code
+                    st.query_params["lang"] = code
+                    st.rerun()
+    st.markdown("</div>", unsafe_allow_html=True)
 
 with top_cal:
     st.markdown(
@@ -765,9 +782,7 @@ with top_cal:
     month_key = f"{cal_y:04d}-{cal_m:02d}"
     data_days_set = {d for d in available_days if d.year == cal_y and d.month == cal_m}
 
-    # HTML-рамка только для CSS/размера; клики — через Streamlit (надёжно)
     st.markdown('<div class="akela-cal-panel cal-wrap">', unsafe_allow_html=True)
-
     wd = weekday_labels(lang)
     head = st.columns([0.85] + [1] * 7)
     head[0].caption(t(lang, "week_col"))
@@ -805,9 +820,8 @@ with top_cal:
                 else:
                     has_data = cur in data_days_set
                     is_sel = st.session_state.cal_day == cur
-                    label = str(cur.day)
                     if st.button(
-                        label,
+                        str(cur.day),
                         key=f"cal_d_{cur.isoformat()}",
                         use_container_width=True,
                         type="primary" if is_sel else "secondary",
@@ -822,46 +836,61 @@ with top_cal:
                                 del st.query_params[k]
                         st.rerun()
             cur += timedelta(days=1)
-
     st.markdown("</div>", unsafe_allow_html=True)
     st.caption(t(lang, "cal_hint"))
 
-# флаги: только тот же обработчик (календарь уже на кнопках Streamlit)
+# визуал круглых флагов + зелёных дней (клики уже через Streamlit)
+import json as _json
+_flag_payload = _json.dumps({k: v for k, v in _flag_svg_b64.items()})
 components.html(
-    """
+    f"""
     <script>
-    (function () {
+    (function () {{
       const doc = window.parent.document;
-      // компактный вид + зелёные дни (help=report)
-      doc.querySelectorAll('button[data-testid="baseButton-secondary"], button[data-testid="baseButton-primary"]').forEach(function (btn) {
+      const flags = {_flag_payload};
+      function toDataUri(svg) {{
+        return 'url("data:image/svg+xml,' + encodeURIComponent(svg) + '")';
+      }}
+      // языки: кнопка с help lang-xx → круглый флаг
+      doc.querySelectorAll('button').forEach(function (btn) {{
+        const tip = (btn.getAttribute('aria-label') || btn.getAttribute('title') || '');
+        const m = tip.match(/lang-(uz|ru|en)/);
+        if (!m) return;
+        const code = m[1];
+        btn.style.backgroundImage = toDataUri(flags[code]);
+        btn.style.backgroundSize = 'cover';
+        btn.style.backgroundPosition = 'center';
+        btn.style.color = 'transparent';
+        btn.style.fontSize = '0';
+        btn.style.borderRadius = '50%';
+        btn.style.width = '34px';
+        btn.style.height = '34px';
+        btn.style.minHeight = '34px';
+        btn.style.padding = '0';
+        btn.style.overflow = 'hidden';
+      }});
+      // дни: компакт + зелёные report
+      doc.querySelectorAll('button[data-testid="baseButton-secondary"], button[data-testid="baseButton-primary"]').forEach(function (btn) {{
         const label = (btn.innerText || '').trim();
-        // только одно-/двухзначные числа дней и номера недель
-        if (!/^\d{1,2}$/.test(label)) return;
+        if (!/^\\d{{1,2}}$/.test(label)) return;
         btn.style.minHeight = '28px';
         btn.style.height = '28px';
         btn.style.padding = '0';
         btn.style.fontSize = '12px';
         btn.style.boxShadow = 'none';
+        btn.style.borderRadius = '4px';
         const tip = (btn.getAttribute('aria-label') || btn.getAttribute('title') || '');
-        const isPrimary = (btn.getAttribute('data-testid') || '').indexOf('primary') >= 0
-          || (btn.getAttribute('kind') || '') === 'primary';
-        if (!isPrimary && tip.indexOf('report') >= 0) {
+        const isPrimary = (btn.getAttribute('data-testid') || '').indexOf('primary') >= 0;
+        if (!isPrimary && tip.indexOf('report') >= 0) {{
           btn.style.background = '#C6F6D5';
           btn.style.border = '1px solid #1F7A4C';
           btn.style.color = '#14532d';
-        }
-      });
-      doc.querySelectorAll('a.lang-btn').forEach(function (a) {
-        a.addEventListener('click', function (e) {
-          e.preventDefault();
-          e.stopPropagation();
-          const href = a.getAttribute('href') || '';
-          if (!href) return;
-          const u = new URL(href, window.parent.location.href);
-          window.parent.location.href = u.toString();
-        }, true);
-      });
-    })();
+        }} else if (!isPrimary) {{
+          btn.style.background = '#EEF2F6';
+          btn.style.color = '#1A2332';
+        }}
+      }});
+    }})();
     </script>
     """,
     height=0,
