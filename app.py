@@ -105,43 +105,74 @@ html, body, [class*="css"] {
   max-width: 1180px !important;
 }
 
-/* —— Brand hero —— */
-.akela-hero {
-  position: relative;
-  padding: 0.2rem 0 1.4rem;
-  margin-bottom: 0.4rem;
-  animation: rise 0.7s ease-out both;
+/* compact header styles */
+.akela-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 0.6rem;
+}
+.akela-logo-sm img { max-width: 132px !important; }
+.cal-wrap {
+  max-width: 420px;
+}
+.cal-grid {
+  display: grid;
+  grid-template-columns: 36px repeat(7, 1fr);
+  gap: 3px;
+  font-size: 12px;
+}
+.cal-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  border-radius: 4px;
+  text-decoration: none;
+  color: #1A2332;
+  background: #EEF2F6;
+  border: 1px solid transparent;
+  font-weight: 600;
+}
+.cal-cell.has-data {
+  background: #C6F6D5 !important;
+  border-color: #1F7A4C;
+  color: #14532d;
+}
+.cal-cell.selected {
+  background: #3E4197 !important;
+  color: #fff !important;
+  border-color: #2A2D7A;
+}
+.cal-cell.muted {
+  background: transparent;
+  color: transparent;
+  pointer-events: none;
+}
+.cal-head {
+  text-align: center;
+  font-size: 10px;
+  color: #7A8B9C;
+  font-weight: 600;
+}
+.lang-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 2px solid #D5E0EA;
+  text-decoration: none;
+  font-size: 20px;
+  margin-left: 6px;
+  background: #fff;
+}
+.lang-btn.active {
+  border-color: #3E4197;
+  box-shadow: 0 0 0 2px rgba(62,65,151,0.25);
 }
 
-.akela-logo-wrap {
-  max-width: 220px;
-  margin: 0 0 0.85rem;
-}
-
-.akela-logo-wrap img {
-  width: 100%;
-  height: auto;
-  display: block;
-}
-
-.akela-subtitle {
-  margin: 0;
-  font-family: "Unbounded", sans-serif;
-  font-weight: 500;
-  font-size: clamp(1.05rem, 2.2vw, 1.35rem);
-  letter-spacing: 0.02em;
-  line-height: 1.25;
-  color: var(--teal);
-}
-
-.akela-rule {
-  height: 3px;
-  width: 72px;
-  margin-top: 1.1rem;
-  background: linear-gradient(90deg, var(--teal), transparent);
-  border-radius: 2px;
-  animation: grow 0.9s 0.2s ease-out both;
-}
 
 @keyframes rise {
   from { opacity: 0; transform: translateY(14px); }
@@ -269,44 +300,9 @@ div[data-testid="stPlotlyChart"] {
     unsafe_allow_html=True,
 )
 
-st.markdown('<div class="akela-hero">', unsafe_allow_html=True)
-if LOGO_PATH.exists():
-    st.image(str(LOGO_PATH), width=240)
-st.markdown(
-    """
-  <p class="akela-subtitle">отчёты по нормативам</p>
-  <div class="akela-rule"></div>
-</div>
-""",
-    unsafe_allow_html=True,
-)
+from urllib.parse import urlencode
 
-# Plotly theme
-PLOTLY_LAYOUT = dict(
-    paper_bgcolor="rgba(0,0,0,0)",
-    plot_bgcolor="rgba(0,0,0,0)",
-    font=dict(family="Onest, sans-serif", color="#1A2332", size=13),
-    margin=dict(l=24, r=16, t=48, b=24),
-    title=dict(font=dict(family="Unbounded, sans-serif", size=14, color="#3E4197")),
-    colorway=["#3E4197", "#1F7A4C", "#B7791F", "#C53030", "#7A8B9C", "#1A2332"],
-)
-
-
-def _admin_delete_token() -> str:
-    try:
-        if hasattr(st, "secrets") and st.secrets.get("ADMIN_DELETE_TOKEN"):
-            return str(st.secrets["ADMIN_DELETE_TOKEN"]).strip()
-    except Exception:
-        pass
-    return os.getenv("ADMIN_DELETE_TOKEN", "").strip()
-
-
-_admin_token = _admin_delete_token()
-_admin_unlocked = bool(
-    _admin_token
-    and str(st.query_params.get("admin") or "").strip() == _admin_token
-)
-
+from i18n import t, month_name, weekday_labels
 from schedule import (
     active_window_day,
     now_tashkent,
@@ -339,37 +335,97 @@ from shared_store import (
     list_available_months,
 )
 
-# Битрикс24-режим сохранён в git — временно только Excel + Google Drive.
+# Plotly theme
+PLOTLY_LAYOUT = dict(
+    paper_bgcolor="rgba(0,0,0,0)",
+    plot_bgcolor="rgba(0,0,0,0)",
+    font=dict(family="Onest, sans-serif", color="#1A2332", size=13),
+    margin=dict(l=24, r=16, t=48, b=24),
+    title=dict(font=dict(family="Unbounded, sans-serif", size=14, color="#3E4197")),
+    colorway=["#3E4197", "#1F7A4C", "#B7791F", "#C53030", "#7A8B9C", "#1A2332"],
+)
+
+
+def _admin_delete_token() -> str:
+    try:
+        if hasattr(st, "secrets") and st.secrets.get("ADMIN_DELETE_TOKEN"):
+            return str(st.secrets["ADMIN_DELETE_TOKEN"]).strip()
+    except Exception:
+        pass
+    return os.getenv("ADMIN_DELETE_TOKEN", "").strip()
+
+
+_admin_token = _admin_delete_token()
+_admin_unlocked = bool(
+    _admin_token
+    and str(st.query_params.get("admin") or "").strip() == _admin_token
+)
 
 now = now_tashkent()
 current_slot = active_window_day(now)
 upload_ok, upload_reason = can_upload_for_day(current_slot, now)
 
-_MONTH_NAMES_RU = [
-    "",
-    "Январь",
-    "Февраль",
-    "Март",
-    "Апрель",
-    "Май",
-    "Июнь",
-    "Июль",
-    "Август",
-    "Сентябрь",
-    "Октябрь",
-    "Ноябрь",
-    "Декабрь",
-]
+# ---- язык (uz / ru / en) ----
+if "lang" not in st.session_state:
+    st.session_state.lang = str(st.query_params.get("lang") or "ru").strip().lower()
+    if st.session_state.lang not in {"ru", "uz", "en"}:
+        st.session_state.lang = "ru"
+lang = st.session_state.lang
+if "lang" in st.query_params:
+    qp_lang = str(st.query_params.get("lang") or "").strip().lower()
+    if qp_lang in {"ru", "uz", "en"} and qp_lang != lang:
+        st.session_state.lang = qp_lang
+        lang = qp_lang
 
-# ---- Календарь: месяц → неделя → день ----
-if "cal_year" not in st.session_state:
+
+def _link(**extra: str) -> str:
+    params: dict[str, str] = {"lang": lang}
+    if _admin_unlocked and _admin_token:
+        params["admin"] = _admin_token
+    # при смене языка сохраняем текущий вид календаря
+    if not any(k in extra for k in ("cal_day", "cal_week", "cal_view")):
+        if st.session_state.get("cal_day") is not None:
+            params["cal_day"] = st.session_state.cal_day.isoformat()
+        elif st.session_state.get("cal_week"):
+            params["cal_week"] = st.session_state.cal_week
+        else:
+            params["cal_view"] = "month"
+    params.update({k: str(v) for k, v in extra.items() if v is not None})
+    return "?" + urlencode(params)
+
+
+# ---- календарь: по умолчанию сегодняшний активный день ----
+if "cal_initialized" not in st.session_state:
     st.session_state.cal_year = current_slot.year
-if "cal_month" not in st.session_state:
     st.session_state.cal_month = current_slot.month
-if "cal_week" not in st.session_state:
-    st.session_state.cal_week = None  # e.g. 2026-W33
-if "cal_day" not in st.session_state:
-    st.session_state.cal_day = None  # date or None
+    st.session_state.cal_day = current_slot
+    st.session_state.cal_week = week_id(current_slot)
+    st.session_state.cal_initialized = True
+
+# query sync for day clicks from HTML calendar
+if "cal_day" in st.query_params:
+    try:
+        qd = date.fromisoformat(str(st.query_params["cal_day"]))
+        st.session_state.cal_day = qd
+        st.session_state.cal_week = week_id(qd)
+        st.session_state.cal_year = qd.year
+        st.session_state.cal_month = qd.month
+    except Exception:
+        pass
+if "cal_week" in st.query_params and "cal_day" not in st.query_params:
+    qw = str(st.query_params.get("cal_week") or "").strip()
+    if qw:
+        st.session_state.cal_week = qw
+        st.session_state.cal_day = None
+        try:
+            ws, _ = parse_week_id(qw)
+            st.session_state.cal_year = ws.year
+            st.session_state.cal_month = ws.month
+        except Exception:
+            pass
+if st.query_params.get("cal_view") == "month":
+    st.session_state.cal_week = None
+    st.session_state.cal_day = None
 
 shared_error = None
 available_days: list = []
@@ -379,100 +435,112 @@ try:
 except Exception as exc:
     shared_error = str(exc)
 
-st.markdown('<p class="akela-section-label">Календарь отчётов</p>', unsafe_allow_html=True)
-nav_l, nav_c, nav_r = st.columns([1, 3, 1])
-with nav_l:
-    if st.button("←", use_container_width=True, key="cal_prev"):
-        m = st.session_state.cal_month - 1
-        y = st.session_state.cal_year
-        if m < 1:
-            m, y = 12, y - 1
-        st.session_state.cal_month = m
-        st.session_state.cal_year = y
-        st.session_state.cal_week = None
-        st.session_state.cal_day = None
-        st.rerun()
-with nav_c:
-    month_label = f"{_MONTH_NAMES_RU[st.session_state.cal_month]} {st.session_state.cal_year}"
-    month_view_active = (
-        st.session_state.cal_week is None and st.session_state.cal_day is None
+# ---- шапка: логотип | календарь | язык ----
+top_logo, top_cal, top_lang = st.columns([1.1, 2.4, 1.0])
+with top_logo:
+    if LOGO_PATH.exists():
+        st.image(str(LOGO_PATH), width=132)
+    st.caption(t(lang, "subtitle"))
+
+with top_cal:
+    st.markdown(
+        f'<p class="akela-section-label" style="margin:0 0 0.35rem">{t(lang, "calendar")}</p>',
+        unsafe_allow_html=True,
     )
-    if st.button(
-        month_label,
-        use_container_width=True,
-        key="cal_month_title",
-        type="primary" if month_view_active else "secondary",
-        help="Показать отчёт за весь месяц",
-    ):
-        # клик по названию месяца → месячный вид
-        st.session_state.cal_week = None
-        st.session_state.cal_day = None
-        st.rerun()
-with nav_r:
-    if st.button("→", use_container_width=True, key="cal_next"):
-        m = st.session_state.cal_month + 1
-        y = st.session_state.cal_year
-        if m > 12:
-            m, y = 1, y + 1
-        st.session_state.cal_month = m
-        st.session_state.cal_year = y
-        st.session_state.cal_week = None
-        st.session_state.cal_day = None
-        st.rerun()
+    nav_l, nav_c, nav_r = st.columns([1, 3, 1])
+    with nav_l:
+        if st.button("←", use_container_width=True, key="cal_prev"):
+            m = st.session_state.cal_month - 1
+            y = st.session_state.cal_year
+            if m < 1:
+                m, y = 12, y - 1
+            st.session_state.cal_month = m
+            st.session_state.cal_year = y
+            st.session_state.cal_week = None
+            st.session_state.cal_day = None
+            st.rerun()
+    with nav_c:
+        month_label = f"{month_name(lang, st.session_state.cal_month)} {st.session_state.cal_year}"
+        month_view_active = (
+            st.session_state.cal_week is None and st.session_state.cal_day is None
+        )
+        if st.button(
+            month_label,
+            use_container_width=True,
+            key="cal_month_title",
+            type="primary" if month_view_active else "secondary",
+        ):
+            st.session_state.cal_week = None
+            st.session_state.cal_day = None
+            for k in ("cal_day", "cal_week", "cal_view"):
+                if k in st.query_params:
+                    del st.query_params[k]
+            st.rerun()
+    with nav_r:
+        if st.button("→", use_container_width=True, key="cal_next"):
+            m = st.session_state.cal_month + 1
+            y = st.session_state.cal_year
+            if m > 12:
+                m, y = 1, y + 1
+            st.session_state.cal_month = m
+            st.session_state.cal_year = y
+            st.session_state.cal_week = None
+            st.session_state.cal_day = None
+            st.rerun()
+
+    cal_y, cal_m = st.session_state.cal_year, st.session_state.cal_month
+    month_key = f"{cal_y:04d}-{cal_m:02d}"
+    data_days_set = {d for d in available_days if d.year == cal_y and d.month == cal_m}
+
+    # компактная HTML-сетка: зелёные дни с хотя бы одним отчётом
+    wd = weekday_labels(lang)
+    html = ['<div class="cal-wrap"><div class="cal-grid">']
+    html.append(f'<div class="cal-head">{t(lang, "week_col")}</div>')
+    for lab in wd:
+        html.append(f'<div class="cal-head">{lab}</div>')
+
+    for wid, ws, we in weeks_in_month(cal_y, cal_m):
+        week_sel = st.session_state.cal_week == wid and st.session_state.cal_day is None
+        wcls = "cal-cell selected" if week_sel else "cal-cell"
+        html.append(
+            f'<a class="{wcls}" href="{_link(cal_week=wid)}" title="{ws.strftime("%d.%m")}–{we.strftime("%d.%m")}">'
+            f'{wid.split("-W")[-1]}</a>'
+        )
+        cur = ws
+        for _ in range(7):
+            in_month = cur.month == cal_m and cur.year == cal_y
+            if not in_month:
+                html.append('<div class="cal-cell muted">·</div>')
+            else:
+                has_data = cur in data_days_set
+                is_sel = st.session_state.cal_day == cur
+                cls = "cal-cell"
+                if has_data:
+                    cls += " has-data"
+                if is_sel:
+                    cls += " selected"
+                html.append(
+                    f'<a class="{cls}" href="{_link(cal_day=cur.isoformat())}">{cur.day}</a>'
+                )
+            cur += timedelta(days=1)
+    html.append("</div></div>")
+    st.markdown("".join(html), unsafe_allow_html=True)
+    st.caption(t(lang, "cal_hint"))
+
+with top_lang:
+    st.markdown(
+        f'<p class="akela-section-label" style="margin:0 0 0.45rem">{t(lang, "lang")}</p>',
+        unsafe_allow_html=True,
+    )
+    flags = [("uz", "🇺🇿"), ("ru", "🇷🇺"), ("en", "🇬🇧")]
+    flag_html = []
+    for code, flag in flags:
+        cls = "lang-btn active" if lang == code else "lang-btn"
+        flag_html.append(f'<a class="{cls}" href="{_link(lang=code)}" title="{code.upper()}">{flag}</a>')
+    st.markdown("".join(flag_html), unsafe_allow_html=True)
 
 cal_y, cal_m = st.session_state.cal_year, st.session_state.cal_month
 month_key = f"{cal_y:04d}-{cal_m:02d}"
-data_days_set = {d for d in available_days if d.year == cal_y and d.month == cal_m}
-
-# Сетка календаря Пн–Вс
-st.caption(
-    "День → отчёт дня · номер недели слева → неделя · «Август …» сверху → месяц"
-)
-wd_labels = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
-hdr = st.columns(8)
-hdr[0].caption("Нед.")
-for i, lab in enumerate(wd_labels):
-    hdr[i + 1].caption(lab)
-
-for wid, ws, we in weeks_in_month(cal_y, cal_m):
-    row = st.columns(8)
-    # неделя активна, только если выбран этот week и день не выбран
-    week_selected = (
-        st.session_state.cal_week == wid and st.session_state.cal_day is None
-    )
-    if row[0].button(
-        wid.split("-W")[-1],
-        key=f"wk_{wid}",
-        use_container_width=True,
-        type="primary" if week_selected else "secondary",
-        help=f"Неделя {ws.strftime('%d.%m')}–{we.strftime('%d.%m')}",
-    ):
-        # клик по неделе → недельный вид (без дня)
-        st.session_state.cal_week = wid
-        st.session_state.cal_day = None
-        st.rerun()
-
-    cur = ws
-    for i in range(7):
-        in_month = cur.month == cal_m and cur.year == cal_y
-        if not in_month:
-            row[i + 1].markdown("<div style='height:2.2rem'></div>", unsafe_allow_html=True)
-        else:
-            has_data = cur in data_days_set
-            is_sel = st.session_state.cal_day == cur
-            label = f"{cur.day}" + (" ·" if has_data else "")
-            if row[i + 1].button(
-                label,
-                key=f"day_{cur.isoformat()}",
-                use_container_width=True,
-                type="primary" if is_sel else "secondary",
-                help=f"День {cur.strftime('%d.%m.%Y')}",
-            ):
-                # клик по дню → дневной вид
-                st.session_state.cal_day = cur
-                st.session_state.cal_week = week_id(cur)
-                st.rerun()
-        cur += timedelta(days=1)
 
 selected_day = st.session_state.cal_day
 selected_week = st.session_state.cal_week
@@ -484,19 +552,21 @@ else:
     view_mode = "month"
 
 if view_mode == "day":
-    view_title = f"День {selected_day.strftime('%d.%m.%Y')}"
+    view_title = f"{t(lang, 'day')} {selected_day.strftime('%d.%m.%Y')}"
 elif view_mode == "week":
     try:
         w0, w1 = parse_week_id(selected_week)
-        view_title = f"Неделя {selected_week} · {w0.strftime('%d.%m')}–{w1.strftime('%d.%m.%Y')}"
+        view_title = (
+            f"{t(lang, 'week')} {selected_week} · "
+            f"{w0.strftime('%d.%m')}–{w1.strftime('%d.%m.%Y')}"
+        )
     except Exception:
-        view_title = f"Неделя {selected_week}"
+        view_title = f"{t(lang, 'week')} {selected_week}"
 else:
-    view_title = f"Месяц {_MONTH_NAMES_RU[cal_m]} {cal_y}"
+    view_title = f"{t(lang, 'month')} {month_name(lang, cal_m)} {cal_y}"
 
-st.info(f"Сейчас смотрим: **{view_title}**")
+st.info(f"{t(lang, 'viewing')}: **{view_title}**")
 
-# Статус для наблюдателей (рядом с выбранным периодом)
 if not _admin_unlocked:
     if view_mode == "day" and selected_day is not None:
         _vnote = viewer_upload_status(kind="day", day=selected_day)
@@ -504,20 +574,35 @@ if not _admin_unlocked:
         _vnote = viewer_upload_status(kind="week", week_key=selected_week)
     else:
         _vnote = viewer_upload_status(kind="month", year=cal_y, month=cal_m)
+    # map known RU notes if status returns RU hardcoded — viewer_upload_status already RU;
+    # use status text as-is for now (backend messages); prefer i18n keys when closed/not_yet
     if _vnote:
-        st.caption(f"· {_vnote}")
+        if "ещё не наступил" in _vnote or "hali" in _vnote:
+            st.caption(f"· {t(lang, 'not_yet')}")
+        elif "закрыта" in _vnote or "yopilgan" in _vnote or "closed" in _vnote:
+            st.caption(f"· {t(lang, 'closed')}")
+        elif "приём" in _vnote or "qabul" in _vnote or "accepting" in _vnote:
+            st.caption(f"· {t(lang, 'receiving')}")
+        else:
+            st.caption(f"· {_vnote}")
 
 # ---- Загрузка Excel (только админ ?admin=, без ограничений по дате) ----
 if _admin_unlocked:
-    st.markdown('<p class="akela-section-label">Загрузка Excel</p>', unsafe_allow_html=True)
-    upload_kind_label = st.radio(
-        "Тип отчёта",
-        ["Дневной", "Недельный", "Месячный"],
+    st.markdown(
+        f'<p class="akela-section-label">{t(lang, "upload")}</p>',
+        unsafe_allow_html=True,
+    )
+    upload_kind = st.radio(
+        t(lang, "report_type"),
+        options=["day", "week", "month"],
+        format_func=lambda k: {
+            "day": t(lang, "type_day"),
+            "week": t(lang, "type_week"),
+            "month": t(lang, "type_month"),
+        }[k],
         horizontal=True,
         key="upload_kind",
     )
-    upload_kind = {"Дневной": "day", "Недельный": "week", "Месячный": "month"}[upload_kind_label]
-
     if upload_kind == "day":
         target_ref = selected_day or current_slot
         st.caption(
@@ -903,113 +988,6 @@ if _admin_unlocked:
     st.caption(" · ".join(bits))
 
 # =========================
-# Штат (без вакансий) + сдача
-# =========================
-if not filled_staff.empty or not vacancies.empty or not roster.empty:
-    seats_total = int(staffing.attrs.get("seats_total") or len(staffing) or 0)
-    seats_filled = int(staffing.attrs.get("seats_filled") or len(filled_staff) or 0)
-    seats_vacant = int(staffing.attrs.get("seats_vacant") or len(vacancies) or 0)
-    seats_yuk = int(staffing.attrs.get("seats_yuklatilgan") or 0)
-    sub_n = int(filled_staff.attrs.get("submitted") or 0) if not filled_staff.empty else 0
-    miss_n = int(filled_staff.attrs.get("missing") or 0) if not filled_staff.empty else 0
-    people_rate = (
-        (100.0 * sub_n / int(filled_staff.attrs.get("people_total") or sub_n or 1))
-        if (not filled_staff.empty and int(filled_staff.attrs.get("people_total") or 0))
-        else 0.0
-    )
-
-    st.markdown('<p class="akela-section-label">Штат</p>', unsafe_allow_html=True)
-    s1, s2, s3, s4 = st.columns(4)
-    s1.metric("Рабочих мест", seats_total or "—")
-    s2.metric(
-        "Должностей (сдать отчёт)",
-        int(filled_staff.attrs.get("total") or seats_filled),
-    )
-    s3.metric("Сдали отчёт", sub_n)
-    s4.metric("Не сдали", miss_n)
-    denom = int(filled_staff.attrs.get("people_total") or seats_filled or 0)
-    exempt_n = int(filled_staff.attrs.get("exempt") or 0)
-    if _admin_unlocked:
-        st.caption(
-            f"Сдали {people_rate:.0f}% от должностей, которые обязаны сдавать"
-            + (f" ({denom})" if denom else "")
-            + (f" · директора вне графика: {exempt_n}" if exempt_n else "")
-            + (f" · вакансий отдельно: {seats_vacant}" if seats_vacant else "")
-        )
-
-    status_filter = st.radio(
-        "Фильтр штата",
-        ["Все занятые", "✅ Сдали", "❌ Не сдали", "➖ Не обязаны"],
-        horizontal=True,
-        label_visibility="collapsed",
-    )
-    search_staff = st.text_input(
-        "Поиск по штату",
-        placeholder="ФИО, должность или код…",
-        key="staff_search",
-    )
-
-    staff_view = filled_staff.copy()
-    if status_filter == "✅ Сдали":
-        staff_view = staff_view[staff_view["Статус"] != "❌ Не сдал"]
-        staff_view = staff_view[staff_view["Статус"] != "➖ Не обязан"]
-    elif status_filter == "❌ Не сдали":
-        staff_view = staff_view[staff_view["Статус"] == "❌ Не сдал"]
-    elif status_filter == "➖ Не обязаны":
-        staff_view = staff_view[staff_view["Статус"] == "➖ Не обязан"]
-    if search_staff:
-        q = search_staff.strip()
-        staff_view = staff_view[
-            staff_view["ФИО"].astype(str).str.contains(q, case=False, na=False)
-            | staff_view["Должность"].astype(str).str.contains(q, case=False, na=False)
-            | staff_view["Код"].astype(str).str.contains(q, case=False, na=False)
-        ]
-
-    show_staff = [
-        c
-        for c in ["№", "Код", "Должность", "ФИО", "Пометка", "Статус", "KPI", "Категория", "Файл"]
-        if c in staff_view.columns
-    ]
-    st.dataframe(staff_view[show_staff], use_container_width=True, hide_index=True)
-
-    unmatched = list(filled_staff.attrs.get("unmatched_uploads") or []) or list(
-        attendance.attrs.get("unmatched_uploads") or []
-    )
-    if unmatched and _admin_unlocked:
-        st.caption(
-            "Отчёты вне списка (не сопоставлены с ФИО/должностью): "
-            + ", ".join(unmatched[:12])
-            + ("…" if len(unmatched) > 12 else "")
-        )
-
-    # =========================
-    # Вакансии — отдельный раздел
-    # =========================
-    st.markdown('<p class="akela-section-label">Вакансии</p>', unsafe_allow_html=True)
-    if vacancies.empty:
-        if _admin_unlocked:
-            st.caption("Вакансий нет.")
-    else:
-        if _admin_unlocked:
-            st.caption(f"Открытых вакансий: {len(vacancies)}")
-        search_vac = st.text_input(
-            "Поиск по вакансиям",
-            placeholder="Должность или код…",
-            key="vacancy_search",
-        )
-        vac_view = vacancies.copy()
-        if search_vac:
-            q = search_vac.strip()
-            vac_view = vac_view[
-                vac_view["Должность"].astype(str).str.contains(q, case=False, na=False)
-                | vac_view["Код"].astype(str).str.contains(q, case=False, na=False)
-            ]
-        show_vac = [c for c in ["№", "Код", "Должность"] if c in vac_view.columns]
-        st.dataframe(vac_view[show_vac], use_container_width=True, hide_index=True)
-
-    st.divider()
-
-# =========================
 # Metrics + charts (Excel или «все не сдали»)
 # =========================
 from utils import kpi_category as _kpi_cat
@@ -1045,12 +1023,15 @@ else:
         }
     )
 
-st.markdown('<p class="akela-section-label">Сводка по загруженным %</p>', unsafe_allow_html=True)
+st.markdown(
+    f'<p class="akela-section-label">{t(lang, "dashboard")}</p>',
+    unsafe_allow_html=True,
+)
 
 # Вложенные отчёты периода (неделя/день внутри месяца или дни внутри недели)
 if view_mode == "month" and (nested_weekly or nested_daily):
     st.markdown(
-        '<p class="akela-section-label">Внутри месяца</p>', unsafe_allow_html=True
+        f'<p class="akela-section-label">{t(lang, "month")}</p>', unsafe_allow_html=True
     )
     if nested_weekly:
         with st.expander(f"Недельные отчёты ({len(nested_weekly)})", expanded=False):
@@ -1086,22 +1067,25 @@ with_kpi = chart_df[chart_df["KPI"] > 0] if "KPI" in chart_df.columns else chart
 
 c1, c2, c3, c4 = st.columns(4)
 if has_uploads:
-    c1.metric("Записей Excel", len(df))
-    c2.metric("Средний %", f"{df['KPI'].mean():.1f}%")
-    c3.metric("Максимум", f"{df['KPI'].max():.1f}%")
-    c4.metric("Минимум", f"{df['KPI'].min():.1f}%")
+    c1.metric(t(lang, "excel_records"), len(df))
+    c2.metric(t(lang, "avg"), f"{df['KPI'].mean():.1f}%")
+    c3.metric(t(lang, "max"), f"{df['KPI'].max():.1f}%")
+    c4.metric(t(lang, "min"), f"{df['KPI'].min():.1f}%")
 else:
-    c1.metric("Записей Excel", 0)
-    c2.metric("Средний %", "0%")
-    c3.metric("Сдали", "0%")
-    c4.metric("Не сдали", "100%")
+    c1.metric(t(lang, "excel_records"), 0)
+    c2.metric(t(lang, "avg"), "0%")
+    c3.metric(t(lang, "submitted"), "0%")
+    c4.metric(t(lang, "missing"), "100%")
 
 st.divider()
 
 # =========================
 # Charts
 # =========================
-st.markdown('<p class="akela-section-label">Диаграммы</p>', unsafe_allow_html=True)
+st.markdown(
+    f'<p class="akela-section-label">{t(lang, "charts")}</p>',
+    unsafe_allow_html=True,
+)
 
 col1, col2 = st.columns(2)
 
@@ -1115,8 +1099,8 @@ cat_colors = {
 }
 
 # Отдельная круговая: сдали / не сдали (когда нет загрузок — сплошной чёрный 100%)
-submit_label = "❌ Не сдали"
-ok_label = "✅ Сдали"
+submit_label = t(lang, "filter_bad")
+ok_label = t(lang, "filter_ok")
 if has_uploads and not filled_staff.empty:
     sub_n_chart = int(filled_staff.attrs.get("submitted") or 0)
     miss_n_chart = int(filled_staff.attrs.get("missing") or 0)
@@ -1142,7 +1126,7 @@ with col1:
         names="Статус",
         values="Количество",
         hole=0.58,
-        title="Сдали / не сдали",
+        title=t(lang, "pie_submit"),
         color="Статус",
         color_discrete_map=submit_colors,
     )
@@ -1161,7 +1145,7 @@ with col2:
         names="Категория",
         values="Количество",
         hole=0.58,
-        title="По категориям KPI",
+        title=t(lang, "pie_cats"),
         color="Категория",
         color_discrete_map=cat_colors,
     )
@@ -1242,7 +1226,10 @@ st.divider()
 # =========================
 # Filters + table
 # =========================
-st.markdown('<p class="akela-section-label">Таблица</p>', unsafe_allow_html=True)
+st.markdown(
+    f'<p class="akela-section-label">{t(lang, "table")}</p>',
+    unsafe_allow_html=True,
+)
 
 category = st.selectbox(
     "Категория KPI",
@@ -1273,3 +1260,127 @@ if "KPI" in table.columns and not table.empty and table["KPI"].gt(0).any():
         st.dataframe(table, use_container_width=True, hide_index=True)
 else:
     st.dataframe(table, use_container_width=True, hide_index=True)
+
+
+st.divider()
+
+# =========================
+# Штат (без вакансий) + сдача
+# =========================
+if not filled_staff.empty or not vacancies.empty or not roster.empty:
+    seats_total = int(staffing.attrs.get("seats_total") or len(staffing) or 0)
+    seats_filled = int(staffing.attrs.get("seats_filled") or len(filled_staff) or 0)
+    seats_vacant = int(staffing.attrs.get("seats_vacant") or len(vacancies) or 0)
+    seats_yuk = int(staffing.attrs.get("seats_yuklatilgan") or 0)
+    sub_n = int(filled_staff.attrs.get("submitted") or 0) if not filled_staff.empty else 0
+    miss_n = int(filled_staff.attrs.get("missing") or 0) if not filled_staff.empty else 0
+    people_rate = (
+        (100.0 * sub_n / int(filled_staff.attrs.get("people_total") or sub_n or 1))
+        if (not filled_staff.empty and int(filled_staff.attrs.get("people_total") or 0))
+        else 0.0
+    )
+
+    st.markdown(
+        f'<p class="akela-section-label">{t(lang, "staff")}</p>',
+        unsafe_allow_html=True,
+    )
+    s1, s2, s3, s4 = st.columns(4)
+    s1.metric(t(lang, "seats"), seats_total or "—")
+    s2.metric(
+        t(lang, "must_submit"),
+        int(filled_staff.attrs.get("total") or seats_filled),
+    )
+    s3.metric(t(lang, "submitted"), sub_n)
+    s4.metric(t(lang, "missing"), miss_n)
+    denom = int(filled_staff.attrs.get("people_total") or seats_filled or 0)
+    exempt_n = int(filled_staff.attrs.get("exempt") or 0)
+    if _admin_unlocked:
+        st.caption(
+            f"Сдали {people_rate:.0f}% от должностей, которые обязаны сдавать"
+            + (f" ({denom})" if denom else "")
+            + (f" · директора вне графика: {exempt_n}" if exempt_n else "")
+            + (f" · вакансий отдельно: {seats_vacant}" if seats_vacant else "")
+        )
+
+    status_filter = st.radio(
+        "Фильтр штата",
+        options=["all", "ok", "bad", "exempt"],
+        format_func=lambda k: {
+            "all": t(lang, "filter_all"),
+            "ok": t(lang, "filter_ok"),
+            "bad": t(lang, "filter_bad"),
+            "exempt": t(lang, "filter_exempt"),
+        }[k],
+        horizontal=True,
+        label_visibility="collapsed",
+        key="staff_status_filter",
+    )
+    search_staff = st.text_input(
+        t(lang, "search_staff"),
+        placeholder="ФИО…",
+        key="staff_search",
+    )
+
+    staff_view = filled_staff.copy()
+    if status_filter == "ok":
+        staff_view = staff_view[staff_view["Статус"] != "❌ Не сдал"]
+        staff_view = staff_view[staff_view["Статус"] != "➖ Не обязан"]
+    elif status_filter == "bad":
+        staff_view = staff_view[staff_view["Статус"] == "❌ Не сдал"]
+    elif status_filter == "exempt":
+        staff_view = staff_view[staff_view["Статус"] == "➖ Не обязан"]
+    if search_staff:
+        q = search_staff.strip()
+        staff_view = staff_view[
+            staff_view["ФИО"].astype(str).str.contains(q, case=False, na=False)
+            | staff_view["Должность"].astype(str).str.contains(q, case=False, na=False)
+            | staff_view["Код"].astype(str).str.contains(q, case=False, na=False)
+        ]
+
+    show_staff = [
+        c
+        for c in ["№", "Код", "Должность", "ФИО", "Пометка", "Статус", "KPI", "Категория", "Файл"]
+        if c in staff_view.columns
+    ]
+    st.dataframe(staff_view[show_staff], use_container_width=True, hide_index=True)
+
+    unmatched = list(filled_staff.attrs.get("unmatched_uploads") or []) or list(
+        attendance.attrs.get("unmatched_uploads") or []
+    )
+    if unmatched and _admin_unlocked:
+        st.caption(
+            "Отчёты вне списка (не сопоставлены с ФИО/должностью): "
+            + ", ".join(unmatched[:12])
+            + ("…" if len(unmatched) > 12 else "")
+        )
+
+    # =========================
+    # Вакансии — отдельный раздел
+    # =========================
+    st.markdown(
+        f'<p class="akela-section-label">{t(lang, "vacancies")}</p>',
+        unsafe_allow_html=True,
+    )
+    if vacancies.empty:
+        if _admin_unlocked:
+            st.caption(t(lang, "no_vac"))
+    else:
+        if _admin_unlocked:
+            st.caption(f"{t(lang, 'open_vac')}: {len(vacancies)}")
+        search_vac = st.text_input(
+            t(lang, "search_vac"),
+            placeholder="…",
+            key="vacancy_search",
+        )
+        vac_view = vacancies.copy()
+        if search_vac:
+            q = search_vac.strip()
+            vac_view = vac_view[
+                vac_view["Должность"].astype(str).str.contains(q, case=False, na=False)
+                | vac_view["Код"].astype(str).str.contains(q, case=False, na=False)
+            ]
+        show_vac = [c for c in ["№", "Код", "Должность"] if c in vac_view.columns]
+        st.dataframe(vac_view[show_vac], use_container_width=True, hide_index=True)
+
+    st.divider()
+

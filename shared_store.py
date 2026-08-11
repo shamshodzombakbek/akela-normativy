@@ -303,9 +303,8 @@ def list_available_days(store: dict | None = None) -> list[date]:
     days = []
     for key, slot in (store.get("days") or {}).items():
         try:
-            has_emp = bool(slot.get("employees"))
-            has_ov = bool(slot.get("seat_overrides"))
-            if has_emp or has_ov:
+            # зелёный день = хотя бы один загруженный отчёт
+            if bool(slot.get("employees")):
                 days.append(date.fromisoformat(key))
         except Exception:
             continue
