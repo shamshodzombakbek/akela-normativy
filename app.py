@@ -265,24 +265,51 @@ a.cal-cell:hover { filter: brightness(0.96); color: inherit; }
   color: transparent;
   pointer-events: none;
 }
-/* стили только внутри колонки шапки — не всего main (иначе :has ломает страницу после rerun) */
+/* календарь: только колонка шапки; сильно ужат под «красный квадрат» */
+div[data-testid="column"]:has(.akela-cal-panel) [data-testid="stVerticalBlock"] {
+  gap: 0.12rem !important;
+}
+div[data-testid="column"]:has(.akela-cal-panel) [data-testid="stElementContainer"],
+div[data-testid="column"]:has(.akela-cal-panel) .element-container {
+  margin-bottom: 0 !important;
+}
+div[data-testid="column"]:has(.akela-cal-panel) .akela-section-label {
+  font-size: 0.58rem !important;
+  letter-spacing: 0.1em !important;
+  margin: 0 0 0.1rem !important;
+}
+div[data-testid="column"]:has(.akela-cal-panel) .cal-head-row {
+  display: grid;
+  grid-template-columns: 0.7fr repeat(7, 1fr);
+  gap: 1px;
+  text-align: center;
+  font-size: 9px;
+  color: #7A8B9C;
+  font-weight: 600;
+  line-height: 1.1;
+  margin: 0 0 1px;
+}
 div[data-testid="column"]:has(.akela-cal-panel) div[data-testid="stHorizontalBlock"] {
-  gap: 2px !important;
+  gap: 1px !important;
   flex-wrap: nowrap !important;
 }
 div[data-testid="column"]:has(.akela-cal-panel) div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
   min-width: 0 !important;
   flex: 1 1 0 !important;
 }
+div[data-testid="column"]:has(.akela-cal-panel) .stButton {
+  margin: 0 !important;
+  min-height: 0 !important;
+}
 div[data-testid="column"]:has(.akela-cal-panel) button[data-testid="baseButton-secondary"],
 div[data-testid="column"]:has(.akela-cal-panel) button[data-testid="baseButton-primary"],
 div[data-testid="column"]:has(.akela-cal-panel) .stButton > button {
-  min-height: 24px !important;
-  height: 24px !important;
-  max-height: 24px !important;
+  min-height: 16px !important;
+  height: 16px !important;
+  max-height: 16px !important;
   padding: 0 !important;
-  font-size: 11px !important;
-  border-radius: 4px !important;
+  font-size: 9px !important;
+  border-radius: 3px !important;
   box-shadow: none !important;
   line-height: 1 !important;
   white-space: nowrap !important;
@@ -309,37 +336,56 @@ div[data-testid="column"]:has(.akela-cal-panel) .stTooltipHoverTarget:has([aria-
   border: 1px solid #1F7A4C !important;
   color: #14532d !important;
 }
+div[data-testid="column"]:has(.akela-cal-panel) .stCaption,
+div[data-testid="column"]:has(.akela-cal-panel) [data-testid="stCaptionContainer"] {
+  font-size: 0.62rem !important;
+  margin: 0.15rem 0 0 !important;
+  padding: 0 !important;
+}
 
-.lang-flags-html {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  justify-content: center;
-  margin-top: 0.15rem;
+/* флаги: кнопки Streamlit (без <a> — не уводят на другой сайт) */
+div[data-testid="column"]:has(.lang-flags) .akela-section-label {
+  font-size: 0.58rem !important;
+  margin: 0 0 0.15rem !important;
 }
-.lang-flags-html .lang-btn {
-  width: 34px;
-  height: 34px;
-  border-radius: 50%;
-  border: 2px solid #D5E0EA;
-  overflow: hidden;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  text-decoration: none !important;
-  background: #fff;
-  flex: 0 0 34px;
+div[data-testid="column"]:has(.lang-flags) div[data-testid="stHorizontalBlock"] {
+  gap: 6px !important;
+  flex-wrap: nowrap !important;
+  justify-content: center !important;
 }
-.lang-flags-html .lang-btn.active {
-  border-color: #3E4197;
-  box-shadow: 0 0 0 2px rgba(62,65,151,0.25);
+div[data-testid="column"]:has(.lang-flags) div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
+  min-width: 30px !important;
+  flex: 0 0 30px !important;
+  width: 30px !important;
+  max-width: 30px !important;
 }
-.lang-flags-html .lang-btn svg {
-  width: 100%;
-  height: 100%;
-  display: block;
-  transform: scale(1.35);
-  pointer-events: none;
+div[data-testid="column"]:has(.lang-flags) .stButton {
+  margin: 0 !important;
+}
+div[data-testid="column"]:has(.lang-flags) button[data-testid="baseButton-secondary"],
+div[data-testid="column"]:has(.lang-flags) button[data-testid="baseButton-primary"],
+div[data-testid="column"]:has(.lang-flags) .stButton > button {
+  width: 30px !important;
+  height: 30px !important;
+  min-height: 30px !important;
+  max-height: 30px !important;
+  border-radius: 50% !important;
+  padding: 0 !important;
+  font-size: 0 !important;
+  line-height: 0 !important;
+  color: transparent !important;
+  box-shadow: none !important;
+  overflow: hidden !important;
+  border: 2px solid #D5E0EA !important;
+  background: transparent !important;
+  background-size: cover !important;
+  background-position: center !important;
+  background-repeat: no-repeat !important;
+  transform: none !important;
+}
+div[data-testid="column"]:has(.lang-flags) button[data-testid="baseButton-primary"] {
+  border-color: #3E4197 !important;
+  box-shadow: 0 0 0 2px rgba(62,65,151,0.25) !important;
 }
 
 @keyframes rise {
@@ -492,7 +538,7 @@ div[data-testid="stPlotlyChart"]:hover {
     unsafe_allow_html=True,
 )
 
-from urllib.parse import urlencode
+from urllib.parse import urlencode, quote
 
 from i18n import t, month_name, weekday_labels
 from schedule import (
@@ -639,11 +685,11 @@ except Exception as exc:
     shared_error = str(exc)
 
 # ---- шапка: логотип | календарь по центру | флаги справа ----
-top_logo, top_cal, top_lang = st.columns([1.0, 1.55, 0.95])
+top_logo, top_cal, top_lang = st.columns([0.95, 1.45, 0.85])
 
 with top_logo:
     if LOGO_PATH.exists():
-        st.image(str(LOGO_PATH), width=88 if _mobile else 120)
+        st.image(str(LOGO_PATH), width=72 if _mobile else 96)
     st.caption(t(lang, "subtitle"))
 
 _flag_svgs = {
@@ -675,48 +721,61 @@ _flag_svgs = {
         "</svg>"
     ),
 }
-
-
-def _lang_href(code: str) -> str:
-    """Смена языка через query — флаги HTML, без Streamlit-кнопок (не ломаются после клика)."""
-    flat: dict[str, str] = {}
-    for k in st.query_params:
-        v = st.query_params.get(k)
-        if isinstance(v, list):
-            v = v[0] if v else ""
-        flat[str(k)] = str(v)
-    flat["lang"] = code
-    return "?" + urlencode(flat)
-
+_flag_css_uris = {
+    code: f'url("data:image/svg+xml,{quote(svg)}")' for code, svg in _flag_svgs.items()
+}
+st.markdown(
+    f"""
+<style>
+div[data-testid="column"]:has(.lang-flags) div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:nth-child(1) button {{
+  background-image: {_flag_css_uris["uz"]} !important;
+}}
+div[data-testid="column"]:has(.lang-flags) div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:nth-child(2) button {{
+  background-image: {_flag_css_uris["ru"]} !important;
+}}
+div[data-testid="column"]:has(.lang-flags) div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:nth-child(3) button {{
+  background-image: {_flag_css_uris["en"]} !important;
+}}
+div[data-testid="column"]:has(.lang-flags) button[data-testid="baseButton-primary"] {{
+  /* сохраняем SVG флага и на активной кнопке */
+  background-color: transparent !important;
+}}
+</style>
+""",
+    unsafe_allow_html=True,
+)
 
 with top_lang:
     st.markdown(
-        f'<p class="akela-section-label" style="margin:0 0 0.25rem;text-align:center">'
+        f'<p class="akela-section-label" style="margin:0 0 0.15rem;text-align:center">'
         f'{t(lang, "lang")}</p>',
         unsafe_allow_html=True,
     )
-    _flag_links = []
-    for code in ("uz", "ru", "en"):
-        active = " active" if lang == code else ""
-        _flag_links.append(
-            f'<a class="lang-btn{active}" href="{_lang_href(code)}" '
-            f'title="{code.upper()}" aria-label="{code.upper()}">{_flag_svgs[code]}</a>'
-        )
-    st.markdown(
-        f'<div class="lang-flags-html">{"".join(_flag_links)}</div>',
-        unsafe_allow_html=True,
-    )
+    st.markdown('<div class="lang-flags"></div>', unsafe_allow_html=True)
+    lf = st.columns(3)
+    for i, code in enumerate(("uz", "ru", "en")):
+        with lf[i]:
+            if st.button(
+                code.upper(),
+                key=f"lang_{code}",
+                use_container_width=True,
+                type="primary" if lang == code else "secondary",
+            ):
+                if code != lang:
+                    st.session_state.lang = code
+                    st.query_params["lang"] = code
+                    st.rerun()
 
 with top_cal:
     st.markdown(
-        f'<p class="akela-section-label" style="margin:0 0 0.2rem;text-align:center;'
-        f'font-size:0.75rem">{t(lang, "calendar")}</p>',
+        f'<p class="akela-section-label" style="margin:0 0 0.1rem;text-align:center">'
+        f'{t(lang, "calendar")}</p>',
         unsafe_allow_html=True,
     )
-    st.markdown('<div class="akela-cal-nav">', unsafe_allow_html=True)
-    nav_l, nav_c, nav_r = st.columns([1, 4, 1])
+    st.markdown('<div class="akela-cal-nav"></div>', unsafe_allow_html=True)
+    nav_l, nav_c, nav_r = st.columns([0.7, 3.6, 0.7])
     with nav_l:
-        if st.button("←", use_container_width=True, key="cal_prev"):
+        if st.button("‹", use_container_width=True, key="cal_prev"):
             m = st.session_state.cal_month - 1
             y = st.session_state.cal_year
             if m < 1:
@@ -747,7 +806,7 @@ with top_cal:
                     del st.query_params[k]
             st.rerun()
     with nav_r:
-        if st.button("→", use_container_width=True, key="cal_next"):
+        if st.button("›", use_container_width=True, key="cal_next"):
             m = st.session_state.cal_month + 1
             y = st.session_state.cal_year
             if m > 12:
@@ -760,21 +819,23 @@ with top_cal:
                 if k in st.query_params:
                     del st.query_params[k]
             st.rerun()
-    st.markdown("</div>", unsafe_allow_html=True)
 
     cal_y, cal_m = st.session_state.cal_year, st.session_state.cal_month
     month_key = f"{cal_y:04d}-{cal_m:02d}"
     data_days_set = {d for d in available_days if d.year == cal_y and d.month == cal_m}
 
-    st.markdown('<div class="akela-cal-panel cal-wrap">', unsafe_allow_html=True)
+    st.markdown('<div class="akela-cal-panel cal-wrap"></div>', unsafe_allow_html=True)
     wd = weekday_labels(lang)
-    head = st.columns([0.75] + [1] * 7)
-    head[0].caption(t(lang, "week_col"))
-    for i, lab in enumerate(wd):
-        head[i + 1].caption(lab)
+    st.markdown(
+        '<div class="cal-head-row">'
+        f'<span>{t(lang, "week_col")[:1]}</span>'
+        + "".join(f"<span>{lab[:2]}</span>" for lab in wd)
+        + "</div>",
+        unsafe_allow_html=True,
+    )
 
     for wid, ws, we in weeks_in_month(cal_y, cal_m):
-        row = st.columns([0.75] + [1] * 7)
+        row = st.columns([0.7] + [1] * 7)
         week_sel = st.session_state.cal_week == wid and st.session_state.cal_day is None
         with row[0]:
             if st.button(
@@ -782,7 +843,6 @@ with top_cal:
                 key=f"cal_w_{wid}",
                 use_container_width=True,
                 type="primary" if week_sel else "secondary",
-                help=f"{ws.strftime('%d.%m')}–{we.strftime('%d.%m')}",
             ):
                 st.session_state.cal_week = wid
                 st.session_state.cal_day = None
@@ -820,8 +880,8 @@ with top_cal:
                                 del st.query_params[k]
                         st.rerun()
             cur += timedelta(days=1)
-    st.markdown("</div>", unsafe_allow_html=True)
     st.caption(t(lang, "cal_hint"))
+
 
 
 
