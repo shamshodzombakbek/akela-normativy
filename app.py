@@ -1278,6 +1278,9 @@ submit_stats = pd.DataFrame(
     }
 )
 submit_stats = submit_stats[submit_stats["Количество"] > 0]
+submit_stats = submit_stats.assign(
+    _code=submit_stats["Статус"].map({ok_label: "ok", submit_label: "bad"})
+)
 submit_colors = {ok_label: "#22A06B", submit_label: "#1A1A1A"}
 _pie_layout = {k: v for k, v in PLOTLY_LAYOUT.items() if k not in {"margin", "title"}}
 
@@ -1302,22 +1305,20 @@ def _map_drill_label(lab: str) -> str | None:
         "❌ Missing",
     }:
         return "bad"
-    if lab in cat_order:
-        return lab
     return None
 
 
-def _scroll_to_drill():
+def _scroll_to_staff():
     components.html(
         """
         <script>
         (function () {
           const doc = window.parent.document;
-          const el = doc.getElementById("akela-drill-anchor");
+          const el = doc.getElementById("akela-staff-anchor");
           if (el) {
             setTimeout(function () {
               el.scrollIntoView({ behavior: "smooth", block: "start" });
-            }, 180);
+            }, 220);
           }
         })();
         </script>
@@ -1330,7 +1331,6 @@ def _clickable_pie(fig, *, key: str, height: int = 380) -> None:
     """Pie with real plotly_click — Streamlit on_select does not work on pies."""
     fig.update_layout(height=height, autosize=True)
     fig_json = fig.to_json()
-    # id must be a valid CSS selector without dots/emojis
     dom_id = "".join(ch if ch.isalnum() else "_" for ch in key)
     html = f"""
 <!DOCTYPE html>
@@ -1369,10 +1369,17 @@ Plotly.newPlot("{dom_id}", fig.data, layout, {{
   gd.on("plotly_click", function(data) {{
     if (!data || !data.points || !data.points.length) return;
     const p = data.points[0];
-    const label = (p.label || p.name || "").toString();
-    if (!label) return;
+    let code = "";
+    if (Array.isArray(p.customdata) && p.customdata.length) {{
+      code = (p.customdata[0] || "").toString();
+    }} else if (p.customdata != null) {{
+      code = String(p.customdata);
+    }} else {{
+      code = (p.label || p.name || "").toString();
+    }}
+    if (!code) return;
     const u = new URL(window.parent.location.href);
-    u.searchParams.set("drill", label);
+    u.searchParams.set("drill", code);
     u.searchParams.set("drill_go", "1");
     window.parent.location.href = u.toString();
   }});
@@ -1383,14 +1390,20 @@ Plotly.newPlot("{dom_id}", fig.data, layout, {{
     components.html(html, height=height + 16, scrolling=False)
 
 
-# query-param drill from pie click
+# клик по диаграмме → фильтр штата + прокрутка к таблице штата
 _just_clicked = str(st.query_params.get("drill_go") or "") == "1"
 if "drill" in st.query_params:
     mapped = _map_drill_label(str(st.query_params.get("drill") or ""))
-    if mapped:
+    if mapped in {"ok", "bad"}:
+        st.session_state.staff_status_filter = mapped
+        st.session_state.staff_kpi_cat = None
+        st.session_state.chart_drill = mapped
+    elif mapped in cat_order:
+        st.session_state.staff_status_filter = "all"
+        st.session_state.staff_kpi_cat = mapped
         st.session_state.chart_drill = mapped
 if _just_clicked:
-    st.session_state["_scroll_drill"] = True
+    st.session_state["_scroll_staff"] = True
     if "drill_go" in st.query_params:
         try:
             del st.query_params["drill_go"]
@@ -1406,6 +1419,7 @@ with col1:
         title=t(lang, "pie_submit"),
         color="Статус",
         color_discrete_map=submit_colors,
+        custom_data=["_code"],
     )
     pie.update_traces(
         textposition="outside",
@@ -1428,9 +1442,9 @@ with col1:
 with col2:
     stats = chart_df["Категория"].value_counts().reindex(cat_order).dropna().reset_index()
     stats.columns = ["Категория", "Количество"]
-    # если пусто — один чёрный сегмент
     if stats.empty:
         stats = pd.DataFrame({"Категория": ["⚫ 0 / не сдал"], "Количество": [len(chart_df) or 1]})
+    stats = stats.assign(_code=stats["Категория"])
     pie2 = px.pie(
         stats,
         names="Категория",
@@ -1439,6 +1453,7 @@ with col2:
         title=t(lang, "pie_cats"),
         color="Категория",
         color_discrete_map=cat_colors,
+        custom_data=["_code"],
     )
     pie2.update_traces(
         textposition="outside",
@@ -1458,183 +1473,130 @@ with col2:
     )
     _clickable_pie(pie2, key="pie_cats_click", height=380)
 
-drill = st.session_state.get("chart_drill")
-
-st.markdown(
-    '<div id="akela-drill-anchor" style="height:1px;scroll-margin-top:1rem;"></div>',
-    unsafe_allow_html=True,
-)
-
-showed_drill = False
-if drill and not filled_staff.empty:
-    showed_drill = True
-    st.markdown(
-        f'<p class="akela-section-label">{t(lang, "drill_seats")}</p>',
-        unsafe_allow_html=True,
-    )
-    drill_view = filled_staff[filled_staff["Статус"] != "➖ Не обязан"].copy()
-    if drill == "ok":
-        drill_view = drill_view[drill_view["Статус"] != "❌ Не сдал"]
-    elif drill == "bad":
-        drill_view = drill_view[drill_view["Статус"] == "❌ Не сдал"]
-    else:
-        if "Категория" not in drill_view.columns:
-            drill_view["Категория"] = drill_view["KPI"].map(
-                lambda x: kpi_category(float(x) if x is not None and str(x) != "" else None)
-            )
-        drill_view = drill_view[drill_view["Категория"] == drill]
-    show_d = [
-        c
-        for c in ["№", "Код", "Должность", "ФИО", "Статус", "KPI", "Категория", "Файл"]
-        if c in drill_view.columns
-    ]
-    st.caption(f"{drill} · {len(drill_view)}")
-    st.dataframe(drill_view[show_d], use_container_width=True, hide_index=True)
-elif drill and has_uploads and not chart_df.empty:
-    showed_drill = True
-    st.markdown(
-        f'<p class="akela-section-label">{t(lang, "drill_seats")}</p>',
-        unsafe_allow_html=True,
-    )
-    if drill == "ok":
-        drill_view = chart_df[chart_df["KPI"] > 0]
-    elif drill == "bad":
-        drill_view = chart_df[chart_df["KPI"] <= 0]
-    else:
-        drill_view = chart_df[chart_df["Категория"] == drill]
-    show_d = [c for c in ["Сотрудник", "KPI", "Категория", "Файл"] if c in drill_view.columns]
-    st.caption(f"{drill} · {len(drill_view)}")
-    st.dataframe(drill_view[show_d], use_container_width=True, hide_index=True)
-
-if showed_drill and st.session_state.pop("_scroll_drill", False):
-    _scroll_to_drill()
-
 if not has_uploads:
     if _admin_unlocked:
         st.caption("Диаграммы: 100% «не сдал» — пока никто не загрузил Excel за этот день.")
-    st.stop()
 
-sort_cols = st.columns([2.2, 1.2])
-with sort_cols[0]:
+if has_uploads:
+    sort_cols = st.columns([2.2, 1.2])
+    with sort_cols[0]:
+        st.markdown(
+            f'<p style="font-family:Unbounded,sans-serif;font-size:0.95rem;'
+            f'color:#3E4197;margin:0.85rem 0 0.35rem;">{t(lang, "people_chart")}</p>',
+            unsafe_allow_html=True,
+        )
+    with sort_cols[1]:
+        sort_mode = st.selectbox(
+            "Сортировка",
+            [
+                "По алфавиту",
+                "По процентам: с высокого",
+                "По процентам: с низкого",
+            ],
+            label_visibility="collapsed",
+            key="people_sort_mode",
+        )
+
+    ordered = df.copy()
+    ordered["_sort_name"] = ordered["Сотрудник"].astype(str).str.strip().str.casefold()
+
+    if sort_mode == "По алфавиту":
+        ordered = ordered.sort_values(["_sort_name", "Сотрудник"], ascending=[True, True])
+    elif sort_mode == "По процентам: с высокого":
+        ordered = ordered.sort_values(["KPI", "_sort_name"], ascending=[False, True])
+    else:
+        ordered = ordered.sort_values(["KPI", "_sort_name"], ascending=[True, True])
+
+    ordered = ordered.drop(columns=["_sort_name"])
+    names_top_to_bottom = ordered["Сотрудник"].tolist()
+    names_bottom_to_top = list(reversed(names_top_to_bottom))
+
+    people = px.bar(
+        ordered,
+        x="KPI",
+        y="Сотрудник",
+        orientation="h",
+        text="KPI",
+        color="Категория",
+        color_discrete_map=cat_colors,
+        category_orders={"Категория": cat_order},
+    )
+    people.update_traces(
+        texttemplate="%{x:.1f}%",
+        textposition="outside",
+        textfont=dict(color="#1A2332", size=12, family="Onest, sans-serif"),
+        cliponaxis=False,
+        insidetextanchor="middle",
+    )
+    layout = {k: v for k, v in PLOTLY_LAYOUT.items() if k != "title"}
+    layout["margin"] = dict(l=12, r=80, t=16, b=24)
+    xmax = float(ordered["KPI"].max()) if not ordered.empty else 100.0
+    people.update_layout(
+        **layout,
+        title=None,
+        showlegend=True,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
+        height=max(360, 32 * len(ordered) + 100),
+        bargap=0.25,
+    )
+    people.update_xaxes(
+        showgrid=True,
+        gridcolor="rgba(26,35,50,0.08)",
+        title="",
+        range=[0, max(120.0, xmax * 1.18 + 8)],
+        ticksuffix="%",
+    )
+    people.update_yaxes(
+        showgrid=False,
+        title="",
+        categoryorder="array",
+        categoryarray=names_bottom_to_top,
+        autorange=True,
+        tickfont=dict(size=12, color="#1A2332"),
+    )
+    st.plotly_chart(people, use_container_width=True)
+
+    st.divider()
+
+    # =========================
+    # Filters + table
+    # =========================
     st.markdown(
-        f'<p style="font-family:Unbounded,sans-serif;font-size:0.95rem;'
-        f'color:#3E4197;margin:0.85rem 0 0.35rem;">{t(lang, "people_chart")}</p>',
+        f'<p class="akela-section-label">{t(lang, "table")}</p>',
         unsafe_allow_html=True,
     )
-with sort_cols[1]:
-    sort_mode = st.selectbox(
-        "Сортировка",
-        [
-            "По алфавиту",
-            "По процентам: с высокого",
-            "По процентам: с низкого",
-        ],
-        label_visibility="collapsed",
-        key="people_sort_mode",
+
+    category = st.selectbox(
+        "Категория KPI",
+        ["Все", "🟢 75+", "🟡 50+", "🟠 20+", "🔴 1+", "⚫ 0 / не сдал"],
     )
+    search = st.text_input("Поиск сотрудника", placeholder="ФИО или должность…")
 
-ordered = df.copy()
-ordered["_sort_name"] = ordered["Сотрудник"].astype(str).str.strip().str.casefold()
+    filtered_df = df.copy()
+    if category != "Все":
+        filtered_df = filtered_df[filtered_df["Категория"] == category]
+    if search:
+        filtered_df = filtered_df[
+            filtered_df["Сотрудник"].str.contains(search, case=False, na=False)
+        ]
 
-if sort_mode == "По алфавиту":
-    ordered = ordered.sort_values(["_sort_name", "Сотрудник"], ascending=[True, True])
-elif sort_mode == "По процентам: с высокого":
-    ordered = ordered.sort_values(["KPI", "_sort_name"], ascending=[False, True])
-else:
-    ordered = ordered.sort_values(["KPI", "_sort_name"], ascending=[True, True])
-
-ordered = ordered.drop(columns=["_sort_name"])
-names_top_to_bottom = ordered["Сотрудник"].tolist()
-names_bottom_to_top = list(reversed(names_top_to_bottom))
-
-people = px.bar(
-    ordered,
-    x="KPI",
-    y="Сотрудник",
-    orientation="h",
-    text="KPI",
-    color="Категория",
-    color_discrete_map=cat_colors,
-    category_orders={"Категория": cat_order},
-)
-# текст % всегда снаружи + запас справа, чтобы не обрезался
-people.update_traces(
-    texttemplate="%{x:.1f}%",
-    textposition="outside",
-    textfont=dict(color="#1A2332", size=12, family="Onest, sans-serif"),
-    cliponaxis=False,
-    insidetextanchor="middle",
-)
-layout = {k: v for k, v in PLOTLY_LAYOUT.items() if k != "title"}
-layout["margin"] = dict(l=12, r=80, t=16, b=24)
-xmax = float(ordered["KPI"].max()) if not ordered.empty else 100.0
-people.update_layout(
-    **layout,
-    title=None,
-    showlegend=True,
-    legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
-    height=max(360, 32 * len(ordered) + 100),
-    bargap=0.25,
-)
-people.update_xaxes(
-    showgrid=True,
-    gridcolor="rgba(26,35,50,0.08)",
-    title="",
-    range=[0, max(120.0, xmax * 1.18 + 8)],
-    ticksuffix="%",
-)
-people.update_yaxes(
-    showgrid=False,
-    title="",
-    categoryorder="array",
-    categoryarray=names_bottom_to_top,
-    autorange=True,
-    tickfont=dict(size=12, color="#1A2332"),
-)
-st.plotly_chart(people, use_container_width=True)
-
-st.divider()
-
-# =========================
-# Filters + table
-# =========================
-st.markdown(
-    f'<p class="akela-section-label">{t(lang, "table")}</p>',
-    unsafe_allow_html=True,
-)
-
-category = st.selectbox(
-    "Категория KPI",
-    ["Все", "🟢 75+", "🟡 50+", "🟠 20+", "🔴 1+", "⚫ 0 / не сдал"],
-)
-search = st.text_input("Поиск сотрудника", placeholder="ФИО или должность…")
-
-filtered_df = df.copy()
-if category != "Все":
-    filtered_df = filtered_df[filtered_df["Категория"] == category]
-if search:
-    filtered_df = filtered_df[
-        filtered_df["Сотрудник"].str.contains(search, case=False, na=False)
+    display_cols = [
+        c
+        for c in ["Сотрудник", "KPI", "Категория", "Файл", "Обновлено"]
+        if c in filtered_df.columns
     ]
+    table = filtered_df[display_cols]
 
-display_cols = [
-    c
-    for c in ["Сотрудник", "KPI", "Категория", "Файл", "Обновлено"]
-    if c in filtered_df.columns
-]
-table = filtered_df[display_cols]
-
-if "KPI" in table.columns and not table.empty and table["KPI"].gt(0).any():
-    try:
-        styled = table.style.background_gradient(subset=["KPI"], cmap="GnBu")
-        st.dataframe(styled, use_container_width=True, hide_index=True)
-    except ImportError:
+    if "KPI" in table.columns and not table.empty and table["KPI"].gt(0).any():
+        try:
+            styled = table.style.background_gradient(subset=["KPI"], cmap="GnBu")
+            st.dataframe(styled, use_container_width=True, hide_index=True)
+        except ImportError:
+            st.dataframe(table, use_container_width=True, hide_index=True)
+    else:
         st.dataframe(table, use_container_width=True, hide_index=True)
-else:
-    st.dataframe(table, use_container_width=True, hide_index=True)
 
-
-st.divider()
+    st.divider()
 
 # =========================
 # Штат (без вакансий) + сдача
@@ -1652,6 +1614,10 @@ if not filled_staff.empty or not vacancies.empty or not roster.empty:
         else 0.0
     )
 
+    st.markdown(
+        '<div id="akela-staff-anchor" style="height:1px;scroll-margin-top:1rem;"></div>',
+        unsafe_allow_html=True,
+    )
     st.markdown(
         f'<p class="akela-section-label">{t(lang, "staff")}</p>',
         unsafe_allow_html=True,
@@ -1701,6 +1667,17 @@ if not filled_staff.empty or not vacancies.empty or not roster.empty:
         staff_view = staff_view[staff_view["Статус"] == "❌ Не сдал"]
     elif status_filter == "exempt":
         staff_view = staff_view[staff_view["Статус"] == "➖ Не обязан"]
+
+    kpi_cat = st.session_state.get("staff_kpi_cat")
+    if kpi_cat:
+        if "Категория" not in staff_view.columns:
+            staff_view = staff_view.copy()
+            staff_view["Категория"] = staff_view["KPI"].map(
+                lambda x: kpi_category(float(x) if x is not None and str(x) != "" else None)
+            )
+        staff_view = staff_view[staff_view["Категория"] == kpi_cat]
+        st.caption(f"{kpi_cat}")
+
     if search_staff:
         q = search_staff.strip()
         staff_view = staff_view[
@@ -1715,6 +1692,9 @@ if not filled_staff.empty or not vacancies.empty or not roster.empty:
         if c in staff_view.columns
     ]
     st.dataframe(staff_view[show_staff], use_container_width=True, hide_index=True)
+
+    if st.session_state.pop("_scroll_staff", False):
+        _scroll_to_staff()
 
     unmatched = list(filled_staff.attrs.get("unmatched_uploads") or []) or list(
         attendance.attrs.get("unmatched_uploads") or []
