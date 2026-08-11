@@ -300,8 +300,6 @@ div[data-testid="stPlotlyChart"] {
     unsafe_allow_html=True,
 )
 
-from urllib.parse import urlencode
-
 from i18n import t, month_name, weekday_labels
 from schedule import (
     active_window_day,
@@ -376,22 +374,6 @@ if "lang" in st.query_params:
     if qp_lang in {"ru", "uz", "en"} and qp_lang != lang:
         st.session_state.lang = qp_lang
         lang = qp_lang
-
-
-def _link(**extra: str) -> str:
-    params: dict[str, str] = {"lang": lang}
-    if _admin_unlocked and _admin_token:
-        params["admin"] = _admin_token
-    # при смене языка сохраняем текущий вид календаря
-    if not any(k in extra for k in ("cal_day", "cal_week", "cal_view")):
-        if st.session_state.get("cal_day") is not None:
-            params["cal_day"] = st.session_state.cal_day.isoformat()
-        elif st.session_state.get("cal_week"):
-            params["cal_week"] = st.session_state.cal_week
-        else:
-            params["cal_view"] = "month"
-    params.update({k: str(v) for k, v in extra.items() if v is not None})
-    return "?" + urlencode(params)
 
 
 # ---- календарь: по умолчанию сегодняшний активный день ----
@@ -492,39 +474,62 @@ with top_cal:
     month_key = f"{cal_y:04d}-{cal_m:02d}"
     data_days_set = {d for d in available_days if d.year == cal_y and d.month == cal_m}
 
-    # компактная HTML-сетка: зелёные дни с хотя бы одним отчётом
+    # компактная сетка кнопок: зелёный маркер · если есть отчёт
     wd = weekday_labels(lang)
-    html = ['<div class="cal-wrap"><div class="cal-grid">']
-    html.append(f'<div class="cal-head">{t(lang, "week_col")}</div>')
-    for lab in wd:
-        html.append(f'<div class="cal-head">{lab}</div>')
+    head = st.columns([0.85] + [1] * 7)
+    head[0].caption(t(lang, "week_col"))
+    for i, lab in enumerate(wd):
+        head[i + 1].caption(lab)
 
     for wid, ws, we in weeks_in_month(cal_y, cal_m):
+        row = st.columns([0.85] + [1] * 7)
         week_sel = st.session_state.cal_week == wid and st.session_state.cal_day is None
-        wcls = "cal-cell selected" if week_sel else "cal-cell"
-        html.append(
-            f'<a class="{wcls}" href="{_link(cal_week=wid)}" title="{ws.strftime("%d.%m")}–{we.strftime("%d.%m")}">'
-            f'{wid.split("-W")[-1]}</a>'
-        )
+        with row[0]:
+            if st.button(
+                wid.split("-W")[-1],
+                key=f"cal_w_{wid}",
+                use_container_width=True,
+                type="primary" if week_sel else "secondary",
+                help=f"{ws.strftime('%d.%m')}–{we.strftime('%d.%m')}",
+            ):
+                st.session_state.cal_week = wid
+                st.session_state.cal_day = None
+                for k in ("cal_day", "cal_week", "cal_view"):
+                    if k in st.query_params:
+                        del st.query_params[k]
+                st.rerun()
         cur = ws
-        for _ in range(7):
+        for di in range(7):
             in_month = cur.month == cal_m and cur.year == cal_y
-            if not in_month:
-                html.append('<div class="cal-cell muted">·</div>')
-            else:
-                has_data = cur in data_days_set
-                is_sel = st.session_state.cal_day == cur
-                cls = "cal-cell"
-                if has_data:
-                    cls += " has-data"
-                if is_sel:
-                    cls += " selected"
-                html.append(
-                    f'<a class="{cls}" href="{_link(cal_day=cur.isoformat())}">{cur.day}</a>'
-                )
+            with row[di + 1]:
+                if not in_month:
+                    st.button(
+                        " ",
+                        key=f"cal_pad_{wid}_{di}",
+                        use_container_width=True,
+                        disabled=True,
+                    )
+                else:
+                    has_data = cur in data_days_set
+                    is_sel = st.session_state.cal_day == cur
+                    # дни с отчётами помечаем зелёным кружком в подписи
+                    label = f"{cur.day}" if not has_data else f"🟢{cur.day}"
+                    if st.button(
+                        label,
+                        key=f"cal_d_{cur.isoformat()}",
+                        use_container_width=True,
+                        type="primary" if is_sel else "secondary",
+                        help=("есть отчёт" if has_data else None),
+                    ):
+                        st.session_state.cal_day = cur
+                        st.session_state.cal_week = week_id(cur)
+                        st.session_state.cal_year = cur.year
+                        st.session_state.cal_month = cur.month
+                        for k in ("cal_day", "cal_week", "cal_view"):
+                            if k in st.query_params:
+                                del st.query_params[k]
+                        st.rerun()
             cur += timedelta(days=1)
-    html.append("</div></div>")
-    st.markdown("".join(html), unsafe_allow_html=True)
     st.caption(t(lang, "cal_hint"))
 
 with top_lang:
@@ -533,11 +538,20 @@ with top_lang:
         unsafe_allow_html=True,
     )
     flags = [("uz", "🇺🇿"), ("ru", "🇷🇺"), ("en", "🇬🇧")]
-    flag_html = []
-    for code, flag in flags:
-        cls = "lang-btn active" if lang == code else "lang-btn"
-        flag_html.append(f'<a class="{cls}" href="{_link(lang=code)}" title="{code.upper()}">{flag}</a>')
-    st.markdown("".join(flag_html), unsafe_allow_html=True)
+    lang_cols = st.columns(3)
+    for i, (code, flag) in enumerate(flags):
+        with lang_cols[i]:
+            if st.button(
+                flag,
+                key=f"lang_{code}",
+                use_container_width=True,
+                type="primary" if lang == code else "secondary",
+                help=code.upper(),
+            ):
+                if code != lang:
+                    st.session_state.lang = code
+                    st.query_params["lang"] = code
+                    st.rerun()
 
 cal_y, cal_m = st.session_state.cal_year, st.session_state.cal_month
 month_key = f"{cal_y:04d}-{cal_m:02d}"
