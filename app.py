@@ -495,104 +495,106 @@ else:
 
 st.info(f"Сейчас смотрим: **{view_title}**")
 
-# ---- Загрузка Excel ----
-st.markdown('<p class="akela-section-label">Загрузка Excel</p>', unsafe_allow_html=True)
-upload_kind_label = st.radio(
-    "Тип отчёта",
-    ["Дневной", "Недельный", "Месячный"],
-    horizontal=True,
-    key="upload_kind",
-)
-upload_kind = {"Дневной": "day", "Недельный": "week", "Месячный": "month"}[upload_kind_label]
-
-if upload_kind == "day":
-    target_ref = selected_day or current_slot
-    ok_up, reason_up = can_upload_for_day(target_ref)
-    st.caption(
-        f"Слот дня: {target_ref.strftime('%d.%m.%Y')}. "
-        "После 20:00 (Ташкент) за сегодня добавить нельзя."
+# ---- Загрузка Excel (только админ ?admin=) ----
+if _admin_unlocked:
+    st.markdown('<p class="akela-section-label">Загрузка Excel</p>', unsafe_allow_html=True)
+    upload_kind_label = st.radio(
+        "Тип отчёта",
+        ["Дневной", "Недельный", "Месячный"],
+        horizontal=True,
+        key="upload_kind",
     )
-    if not ok_up:
-        st.warning(reason_up)
-elif upload_kind == "week":
-    if selected_week:
-        target_ref, _ = parse_week_id(selected_week)
-    elif selected_day:
-        target_ref = selected_day
-    else:
-        target_ref = current_slot
-    ok_up, reason_up = True, ""
-    st.caption(f"Недельный слот: {week_id(target_ref)}")
-else:
-    target_ref = date(cal_y, cal_m, 1)
-    ok_up, reason_up = True, ""
-    st.caption(f"Месячный слот: {month_id(target_ref)}")
+    upload_kind = {"Дневной": "day", "Недельный": "week", "Месячный": "month"}[upload_kind_label]
 
-if shared_error:
-    st.warning(
-        "Google Drive пока недоступен.\n\n"
-        f"`{shared_error}`"
-    )
-
-uploaded_files = None
-if ok_up:
-    uploaded_files = st.file_uploader(
-        "Excel-отчёты",
-        type=["xlsx", "xls"],
-        accept_multiple_files=True,
-        label_visibility="collapsed",
-        key=f"uploader_{upload_kind}",
-    )
-else:
-    st.info("Загрузка для выбранного периода закрыта.")
-
-if uploaded_files and st.button("Показать всем", type="primary"):
     if upload_kind == "day":
-        ok_now, reason_now = can_upload_for_day(target_ref)
-        if not ok_now:
-            st.error(reason_now)
+        target_ref = selected_day or current_slot
+        ok_up, reason_up = can_upload_for_day(target_ref)
+        st.caption(
+            f"Слот дня: {target_ref.strftime('%d.%m.%Y')}. "
+            "После 20:00 (Ташкент) за сегодня добавить нельзя."
+        )
+        if not ok_up:
+            st.warning(reason_up)
+    elif upload_kind == "week":
+        if selected_week:
+            target_ref, _ = parse_week_id(selected_week)
+        elif selected_day:
+            target_ref = selected_day
+        else:
+            target_ref = current_slot
+        ok_up, reason_up = True, ""
+        st.caption(f"Недельный слот: {week_id(target_ref)}")
+    else:
+        target_ref = date(cal_y, cal_m, 1)
+        ok_up, reason_up = True, ""
+        st.caption(f"Месячный слот: {month_id(target_ref)}")
+
+    if shared_error:
+        st.warning(
+            "Google Drive пока недоступен.\n\n"
+            f"`{shared_error}`"
+        )
+
+    uploaded_files = None
+    if ok_up:
+        uploaded_files = st.file_uploader(
+            "Excel-отчёты",
+            type=["xlsx", "xls"],
+            accept_multiple_files=True,
+            label_visibility="collapsed",
+            key=f"uploader_{upload_kind}",
+        )
+    else:
+        st.info("Загрузка для выбранного периода закрыта.")
+
+    if uploaded_files and st.button("Показать всем", type="primary"):
+        if upload_kind == "day":
+            ok_now, reason_now = can_upload_for_day(target_ref)
+            if not ok_now:
+                st.error(reason_now)
+                st.stop()
+
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        local_dir = ROOT / "downloads" / "uploads" / stamp
+        local_dir.mkdir(parents=True, exist_ok=True)
+        for f in uploaded_files:
+            (local_dir / f.name).write_bytes(f.getvalue())
+            try:
+                f.seek(0)
+            except Exception:
+                pass
+
+        incoming = load_uploaded_employees(uploaded_files)
+        if incoming is None or incoming.empty:
+            st.error("Не удалось прочитать % из A1.")
             st.stop()
 
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    local_dir = ROOT / "downloads" / "uploads" / stamp
-    local_dir.mkdir(parents=True, exist_ok=True)
-    for f in uploaded_files:
-        (local_dir / f.name).write_bytes(f.getvalue())
         try:
-            f.seek(0)
-        except Exception:
-            pass
-
-    incoming = load_uploaded_employees(uploaded_files)
-    if incoming is None or incoming.empty:
-        st.error("Не удалось прочитать % из A1.")
-        st.stop()
-
-    try:
-        with st.spinner("Сохраняю для всех…"):
-            if upload_kind == "day":
-                df_pub, meta = publish_day_snapshot(
-                    incoming,
-                    window_day=target_ref,
-                    replace=False,
-                    allow_outside_window=True,
-                )
-            else:
-                df_pub, meta = publish_period_snapshot(
-                    incoming,
-                    kind=upload_kind,
-                    ref=target_ref,
-                    replace=False,
-                    allow_outside_window=True,
-                )
-        st.success(
-            f"Сохранено ({upload_kind_label.lower()}): "
-            f"{meta.get('count', len(df_pub))} записей · {meta.get('period_label') or meta.get('window_day')}"
-        )
-        st.rerun()
-    except Exception as exc:
-        st.error(f"Не удалось сохранить. `{exc}`")
-        st.stop()
+            with st.spinner("Сохраняю для всех…"):
+                if upload_kind == "day":
+                    df_pub, meta = publish_day_snapshot(
+                        incoming,
+                        window_day=target_ref,
+                        replace=False,
+                        allow_outside_window=True,
+                    )
+                else:
+                    df_pub, meta = publish_period_snapshot(
+                        incoming,
+                        kind=upload_kind,
+                        ref=target_ref,
+                        replace=False,
+                        allow_outside_window=True,
+                    )
+            st.success(
+                f"Сохранено ({upload_kind_label.lower()}): "
+                f"{meta.get('count', len(df_pub))} записей · "
+                f"{meta.get('period_label') or meta.get('window_day')}"
+            )
+            st.rerun()
+        except Exception as exc:
+            st.error(f"Не удалось сохранить. `{exc}`")
+            st.stop()
 
 # ---- Загрузка данных периода ----
 nested_weekly: list[tuple[str, pd.DataFrame]] = []
