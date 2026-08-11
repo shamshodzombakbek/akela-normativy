@@ -270,11 +270,51 @@ a.cal-cell:hover { filter: brightness(0.96); color: inherit; }
   color: transparent;
   pointer-events: none;
 }
-.cal-head {
-  text-align: center;
-  font-size: 10px;
-  color: #7A8B9C;
-  font-weight: 600;
+/* компактные кнопки дней календаря — как прежние ячейки */
+.akela-cal-panel div[data-testid="stHorizontalBlock"] {
+  gap: 3px !important;
+  flex-wrap: nowrap !important;
+}
+.akela-cal-panel div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
+  min-width: 0 !important;
+  flex: 1 1 0 !important;
+}
+.akela-cal-panel button[data-testid="baseButton-secondary"],
+.akela-cal-panel button[data-testid="baseButton-primary"],
+.akela-cal-panel .stButton > button {
+  min-height: 28px !important;
+  height: 28px !important;
+  padding: 0 !important;
+  font-size: 12px !important;
+  border-radius: 4px !important;
+  box-shadow: none !important;
+  line-height: 1 !important;
+}
+.akela-cal-panel button[data-testid="baseButton-secondary"] {
+  background: #EEF2F6 !important;
+  border: 1px solid transparent !important;
+  color: #1A2332 !important;
+}
+.akela-cal-panel button[kind="primary"],
+.akela-cal-panel button[data-testid="baseButton-primary"] {
+  background: #3E4197 !important;
+  border: 1px solid #2A2D7A !important;
+  color: #fff !important;
+}
+/* дни с отчётами */
+.akela-cal-panel button[data-testid="baseButton-secondary"][aria-label*="report"],
+.akela-cal-panel .stTooltipHoverTarget:has([aria-label*="report"]) button[data-testid="baseButton-secondary"] {
+  background: #C6F6D5 !important;
+  border: 1px solid #1F7A4C !important;
+  color: #14532d !important;
+}
+@media (max-width: 768px) {
+  .akela-cal-panel button[data-testid="baseButton-secondary"],
+  .akela-cal-panel button[data-testid="baseButton-primary"],
+  .akela-cal-panel .stButton > button {
+    min-height: 32px !important;
+    height: 32px !important;
+  }
 }
 
 
@@ -725,73 +765,93 @@ with top_cal:
     month_key = f"{cal_y:04d}-{cal_m:02d}"
     data_days_set = {d for d in available_days if d.year == cal_y and d.month == cal_m}
 
-    def _cal_href(**extra: str) -> str:
-        params: dict[str, str] = {"lang": lang}
-        if _admin_unlocked and _admin_token:
-            params["admin"] = _admin_token
-        params.update({k: str(v) for k, v in extra.items() if v is not None})
-        return "?" + urlencode(params)
+    # HTML-рамка только для CSS/размера; клики — через Streamlit (надёжно)
+    st.markdown('<div class="akela-cal-panel cal-wrap">', unsafe_allow_html=True)
 
     wd = weekday_labels(lang)
-    cells: list[str] = []
-    cells.append(f'<div class="cal-head">{t(lang, "week_col")}</div>')
-    for lab in wd:
-        cells.append(f'<div class="cal-head">{lab}</div>')
+    head = st.columns([0.85] + [1] * 7)
+    head[0].caption(t(lang, "week_col"))
+    for i, lab in enumerate(wd):
+        head[i + 1].caption(lab)
 
     for wid, ws, we in weeks_in_month(cal_y, cal_m):
+        row = st.columns([0.85] + [1] * 7)
         week_sel = st.session_state.cal_week == wid and st.session_state.cal_day is None
-        wcls = "cal-cell selected" if week_sel else "cal-cell"
-        cells.append(
-            f'<a class="{wcls}" href="{_cal_href(cal_week=wid)}" target="_self" '
-            f'title="{ws.strftime("%d.%m")}–{we.strftime("%d.%m")}">'
-            f'{wid.split("-W")[-1]}</a>'
-        )
+        with row[0]:
+            if st.button(
+                wid.split("-W")[-1],
+                key=f"cal_w_{wid}",
+                use_container_width=True,
+                type="primary" if week_sel else "secondary",
+                help=f"{ws.strftime('%d.%m')}–{we.strftime('%d.%m')}",
+            ):
+                st.session_state.cal_week = wid
+                st.session_state.cal_day = None
+                for k in ("cal_day", "cal_week", "cal_view"):
+                    if k in st.query_params:
+                        del st.query_params[k]
+                st.rerun()
         cur = ws
-        for _ in range(7):
+        for di in range(7):
             in_month = cur.month == cal_m and cur.year == cal_y
-            if not in_month:
-                cells.append('<div class="cal-cell muted">·</div>')
-            else:
-                has_data = cur in data_days_set
-                is_sel = st.session_state.cal_day == cur
-                cls = "cal-cell"
-                if has_data:
-                    cls += " has-data"
-                if is_sel:
-                    cls += " selected"
-                cells.append(
-                    f'<a class="{cls}" href="{_cal_href(cal_day=cur.isoformat())}" '
-                    f'target="_self">{cur.day}</a>'
-                )
+            with row[di + 1]:
+                if not in_month:
+                    st.button(
+                        "·",
+                        key=f"cal_pad_{wid}_{di}",
+                        use_container_width=True,
+                        disabled=True,
+                    )
+                else:
+                    has_data = cur in data_days_set
+                    is_sel = st.session_state.cal_day == cur
+                    label = str(cur.day)
+                    if st.button(
+                        label,
+                        key=f"cal_d_{cur.isoformat()}",
+                        use_container_width=True,
+                        type="primary" if is_sel else "secondary",
+                        help=("report" if has_data else None),
+                    ):
+                        st.session_state.cal_day = cur
+                        st.session_state.cal_week = week_id(cur)
+                        st.session_state.cal_year = cur.year
+                        st.session_state.cal_month = cur.month
+                        for k in ("cal_day", "cal_week", "cal_view"):
+                            if k in st.query_params:
+                                del st.query_params[k]
+                        st.rerun()
             cur += timedelta(days=1)
 
-    st.markdown(
-        '<div class="cal-wrap"><div class="cal-grid">'
-        + "".join(cells)
-        + "</div></div>",
-        unsafe_allow_html=True,
-    )
+    st.markdown("</div>", unsafe_allow_html=True)
     st.caption(t(lang, "cal_hint"))
 
+# флаги: только тот же обработчик (календарь уже на кнопках Streamlit)
 components.html(
     """
     <script>
     (function () {
       const doc = window.parent.document;
-      function wire(sel) {
-        doc.querySelectorAll(sel).forEach(function (a) {
-          a.addEventListener('click', function (e) {
-            e.preventDefault();
-            e.stopPropagation();
-            const href = a.getAttribute('href') || '';
-            if (!href) return;
-            const u = new URL(href, window.parent.location.href);
-            window.parent.location.href = u.toString();
-          }, true);
-        });
-      }
-      wire('a.cal-cell');
-      wire('a.lang-btn');
+      // зелёные дни с отчётами: help="report" → aria-label
+      doc.querySelectorAll('.akela-cal-panel button').forEach(function (btn) {
+        const tip = btn.getAttribute('aria-label') || '';
+        if (tip.indexOf('report') >= 0 && btn.getAttribute('kind') !== 'primary'
+            && btn.getAttribute('data-testid') !== 'baseButton-primary') {
+          btn.style.background = '#C6F6D5';
+          btn.style.border = '1px solid #1F7A4C';
+          btn.style.color = '#14532d';
+        }
+      });
+      doc.querySelectorAll('a.lang-btn').forEach(function (a) {
+        a.addEventListener('click', function (e) {
+          e.preventDefault();
+          e.stopPropagation();
+          const href = a.getAttribute('href') || '';
+          if (!href) return;
+          const u = new URL(href, window.parent.location.href);
+          window.parent.location.href = u.toString();
+        }, true);
+      });
     })();
     </script>
     """,
