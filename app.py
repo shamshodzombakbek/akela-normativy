@@ -152,7 +152,7 @@ html, body, [class*="css"] {
 
 
   .cal-wrap { max-width: 100% !important; }
-  .cal-cell { height: 32px !important; }
+  .cal-cell { height: 24px !important; }
 
   iframe {
     max-width: 100% !important;
@@ -215,26 +215,26 @@ html, body, [class*="css"] {
 }
 .cal-center {
   width: 100%;
-  max-width: 360px;
+  max-width: 240px;
   margin: 0 auto;
 }
 .cal-wrap {
   width: 100%;
-  max-width: 360px;
+  max-width: 240px;
   margin: 0 auto;
 }
 .cal-grid {
   display: grid;
-  grid-template-columns: 32px repeat(7, 1fr);
-  gap: 3px;
-  font-size: 12px;
+  grid-template-columns: 24px repeat(7, 1fr);
+  gap: 2px;
+  font-size: 10px;
 }
 .cal-cell {
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 28px;
-  border-radius: 4px;
+  height: 20px;
+  border-radius: 3px;
   text-decoration: none !important;
   color: #1A2332;
   background: #EEF2F6;
@@ -265,9 +265,9 @@ a.cal-cell:hover { filter: brightness(0.96); color: inherit; }
   color: transparent;
   pointer-events: none;
 }
-/* компактные кнопки дней календаря — как прежние ячейки */
+/* компактные кнопки дней календаря — уже, чем раньше */
 .akela-cal-panel div[data-testid="stHorizontalBlock"] {
-  gap: 3px !important;
+  gap: 2px !important;
   flex-wrap: nowrap !important;
 }
 .akela-cal-panel div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
@@ -277,11 +277,11 @@ a.cal-cell:hover { filter: brightness(0.96); color: inherit; }
 .akela-cal-panel button[data-testid="baseButton-secondary"],
 .akela-cal-panel button[data-testid="baseButton-primary"],
 .akela-cal-panel .stButton > button {
-  min-height: 28px !important;
-  height: 28px !important;
+  min-height: 20px !important;
+  height: 20px !important;
   padding: 0 !important;
-  font-size: 12px !important;
-  border-radius: 4px !important;
+  font-size: 10px !important;
+  border-radius: 3px !important;
   box-shadow: none !important;
   line-height: 1 !important;
 }
@@ -303,31 +303,41 @@ a.cal-cell:hover { filter: brightness(0.96); color: inherit; }
   border: 1px solid #1F7A4C !important;
   color: #14532d !important;
 }
+.akela-cal-nav button[data-testid="baseButton-secondary"],
+.akela-cal-nav button[data-testid="baseButton-primary"],
+.akela-cal-nav .stButton > button {
+  min-height: 26px !important;
+  height: 26px !important;
+  padding: 0 0.35rem !important;
+  font-size: 11px !important;
+  box-shadow: none !important;
+}
 @media (max-width: 768px) {
   .akela-cal-panel button[data-testid="baseButton-secondary"],
   .akela-cal-panel button[data-testid="baseButton-primary"],
   .akela-cal-panel .stButton > button {
-    min-height: 32px !important;
-    height: 32px !important;
+    min-height: 24px !important;
+    height: 24px !important;
+    font-size: 11px !important;
   }
 }
 
 .lang-flags div[data-testid="stHorizontalBlock"] {
-  gap: 8px !important;
+  gap: 6px !important;
   flex-wrap: nowrap !important;
-  justify-content: flex-end !important;
+  justify-content: center !important;
 }
 .lang-flags div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
-  min-width: 34px !important;
-  flex: 0 0 34px !important;
-  width: 34px !important;
+  min-width: 30px !important;
+  flex: 0 0 30px !important;
+  width: 30px !important;
 }
 .lang-flags button[data-testid="baseButton-secondary"],
 .lang-flags button[data-testid="baseButton-primary"],
 .lang-flags .stButton > button {
-  width: 34px !important;
-  height: 34px !important;
-  min-height: 34px !important;
+  width: 30px !important;
+  height: 30px !important;
+  min-height: 30px !important;
   border-radius: 50% !important;
   padding: 0 !important;
   font-size: 0 !important;
@@ -669,11 +679,11 @@ except Exception as exc:
     shared_error = str(exc)
 
 # ---- шапка: логотип | календарь по центру | флаги справа ----
-top_logo, top_cal, top_lang = st.columns([1.15, 2.5, 1.0])
+top_logo, top_cal, top_lang = st.columns([1.05, 2.2, 0.95])
 
 with top_logo:
     if LOGO_PATH.exists():
-        st.image(str(LOGO_PATH), width=96 if _mobile else 132)
+        st.image(str(LOGO_PATH), width=88 if _mobile else 120)
     st.caption(t(lang, "subtitle"))
 
 # SVG-фоны для круглых кнопок языка (ставятся JS-ом по title)
@@ -708,6 +718,11 @@ _flag_svg_b64 = {
 }
 
 with top_lang:
+    st.markdown(
+        f'<p class="akela-section-label" style="margin:0 0 0.25rem;text-align:center">'
+        f'{t(lang, "lang")}</p>',
+        unsafe_allow_html=True,
+    )
     st.markdown('<div class="lang-flags">', unsafe_allow_html=True)
     lf = st.columns(3)
     for i, code in enumerate(("uz", "ru", "en")):
@@ -726,118 +741,123 @@ with top_lang:
     st.markdown("</div>", unsafe_allow_html=True)
 
 with top_cal:
-    st.markdown(
-        f'<p class="akela-section-label" style="margin:0 0 0.35rem;text-align:center">'
-        f'{t(lang, "calendar")}</p>',
-        unsafe_allow_html=True,
-    )
-    nav_l, nav_c, nav_r = st.columns([1, 4, 1])
-    with nav_l:
-        if st.button("←", use_container_width=True, key="cal_prev"):
-            m = st.session_state.cal_month - 1
-            y = st.session_state.cal_year
-            if m < 1:
-                m, y = 12, y - 1
-            st.session_state.cal_month = m
-            st.session_state.cal_year = y
-            st.session_state.cal_week = None
-            st.session_state.cal_day = None
-            for k in ("cal_day", "cal_week", "cal_view"):
-                if k in st.query_params:
-                    del st.query_params[k]
-            st.rerun()
-    with nav_c:
-        month_label = f"{month_name(lang, st.session_state.cal_month)} {st.session_state.cal_year}"
-        month_view_active = (
-            st.session_state.cal_week is None and st.session_state.cal_day is None
+    # узкая внутренняя колонка — календарь визуально маленький, как на 2-м фото
+    _sp_l, cal_box, _sp_r = st.columns([0.55, 2.0, 0.55])
+    with cal_box:
+        st.markdown(
+            f'<p class="akela-section-label" style="margin:0 0 0.2rem;text-align:center;'
+            f'font-size:0.75rem">{t(lang, "calendar")}</p>',
+            unsafe_allow_html=True,
         )
-        if st.button(
-            month_label,
-            use_container_width=True,
-            key="cal_month_title",
-            type="primary" if month_view_active else "secondary",
-        ):
-            st.session_state.cal_week = None
-            st.session_state.cal_day = None
-            for k in ("cal_day", "cal_week", "cal_view"):
-                if k in st.query_params:
-                    del st.query_params[k]
-            st.rerun()
-    with nav_r:
-        if st.button("→", use_container_width=True, key="cal_next"):
-            m = st.session_state.cal_month + 1
-            y = st.session_state.cal_year
-            if m > 12:
-                m, y = 1, y + 1
-            st.session_state.cal_month = m
-            st.session_state.cal_year = y
-            st.session_state.cal_week = None
-            st.session_state.cal_day = None
-            for k in ("cal_day", "cal_week", "cal_view"):
-                if k in st.query_params:
-                    del st.query_params[k]
-            st.rerun()
-
-    cal_y, cal_m = st.session_state.cal_year, st.session_state.cal_month
-    month_key = f"{cal_y:04d}-{cal_m:02d}"
-    data_days_set = {d for d in available_days if d.year == cal_y and d.month == cal_m}
-
-    st.markdown('<div class="akela-cal-panel cal-wrap">', unsafe_allow_html=True)
-    wd = weekday_labels(lang)
-    head = st.columns([0.85] + [1] * 7)
-    head[0].caption(t(lang, "week_col"))
-    for i, lab in enumerate(wd):
-        head[i + 1].caption(lab)
-
-    for wid, ws, we in weeks_in_month(cal_y, cal_m):
-        row = st.columns([0.85] + [1] * 7)
-        week_sel = st.session_state.cal_week == wid and st.session_state.cal_day is None
-        with row[0]:
-            if st.button(
-                wid.split("-W")[-1],
-                key=f"cal_w_{wid}",
-                use_container_width=True,
-                type="primary" if week_sel else "secondary",
-                help=f"{ws.strftime('%d.%m')}–{we.strftime('%d.%m')}",
-            ):
-                st.session_state.cal_week = wid
+        st.markdown('<div class="akela-cal-nav">', unsafe_allow_html=True)
+        nav_l, nav_c, nav_r = st.columns([1, 4, 1])
+        with nav_l:
+            if st.button("←", use_container_width=True, key="cal_prev"):
+                m = st.session_state.cal_month - 1
+                y = st.session_state.cal_year
+                if m < 1:
+                    m, y = 12, y - 1
+                st.session_state.cal_month = m
+                st.session_state.cal_year = y
+                st.session_state.cal_week = None
                 st.session_state.cal_day = None
                 for k in ("cal_day", "cal_week", "cal_view"):
                     if k in st.query_params:
                         del st.query_params[k]
                 st.rerun()
-        cur = ws
-        for di in range(7):
-            in_month = cur.month == cal_m and cur.year == cal_y
-            with row[di + 1]:
-                if not in_month:
-                    st.button(
-                        "·",
-                        key=f"cal_pad_{wid}_{di}",
-                        use_container_width=True,
-                        disabled=True,
-                    )
-                else:
-                    has_data = cur in data_days_set
-                    is_sel = st.session_state.cal_day == cur
-                    if st.button(
-                        str(cur.day),
-                        key=f"cal_d_{cur.isoformat()}",
-                        use_container_width=True,
-                        type="primary" if is_sel else "secondary",
-                        help=("report" if has_data else None),
-                    ):
-                        st.session_state.cal_day = cur
-                        st.session_state.cal_week = week_id(cur)
-                        st.session_state.cal_year = cur.year
-                        st.session_state.cal_month = cur.month
-                        for k in ("cal_day", "cal_week", "cal_view"):
-                            if k in st.query_params:
-                                del st.query_params[k]
-                        st.rerun()
-            cur += timedelta(days=1)
-    st.markdown("</div>", unsafe_allow_html=True)
-    st.caption(t(lang, "cal_hint"))
+        with nav_c:
+            month_label = f"{month_name(lang, st.session_state.cal_month)} {st.session_state.cal_year}"
+            month_view_active = (
+                st.session_state.cal_week is None and st.session_state.cal_day is None
+            )
+            if st.button(
+                month_label,
+                use_container_width=True,
+                key="cal_month_title",
+                type="primary" if month_view_active else "secondary",
+            ):
+                st.session_state.cal_week = None
+                st.session_state.cal_day = None
+                for k in ("cal_day", "cal_week", "cal_view"):
+                    if k in st.query_params:
+                        del st.query_params[k]
+                st.rerun()
+        with nav_r:
+            if st.button("→", use_container_width=True, key="cal_next"):
+                m = st.session_state.cal_month + 1
+                y = st.session_state.cal_year
+                if m > 12:
+                    m, y = 1, y + 1
+                st.session_state.cal_month = m
+                st.session_state.cal_year = y
+                st.session_state.cal_week = None
+                st.session_state.cal_day = None
+                for k in ("cal_day", "cal_week", "cal_view"):
+                    if k in st.query_params:
+                        del st.query_params[k]
+                st.rerun()
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        cal_y, cal_m = st.session_state.cal_year, st.session_state.cal_month
+        month_key = f"{cal_y:04d}-{cal_m:02d}"
+        data_days_set = {d for d in available_days if d.year == cal_y and d.month == cal_m}
+
+        st.markdown('<div class="akela-cal-panel cal-wrap">', unsafe_allow_html=True)
+        wd = weekday_labels(lang)
+        head = st.columns([0.75] + [1] * 7)
+        head[0].caption(t(lang, "week_col"))
+        for i, lab in enumerate(wd):
+            head[i + 1].caption(lab)
+
+        for wid, ws, we in weeks_in_month(cal_y, cal_m):
+            row = st.columns([0.75] + [1] * 7)
+            week_sel = st.session_state.cal_week == wid and st.session_state.cal_day is None
+            with row[0]:
+                if st.button(
+                    wid.split("-W")[-1],
+                    key=f"cal_w_{wid}",
+                    use_container_width=True,
+                    type="primary" if week_sel else "secondary",
+                    help=f"{ws.strftime('%d.%m')}–{we.strftime('%d.%m')}",
+                ):
+                    st.session_state.cal_week = wid
+                    st.session_state.cal_day = None
+                    for k in ("cal_day", "cal_week", "cal_view"):
+                        if k in st.query_params:
+                            del st.query_params[k]
+                    st.rerun()
+            cur = ws
+            for di in range(7):
+                in_month = cur.month == cal_m and cur.year == cal_y
+                with row[di + 1]:
+                    if not in_month:
+                        st.button(
+                            "·",
+                            key=f"cal_pad_{wid}_{di}",
+                            use_container_width=True,
+                            disabled=True,
+                        )
+                    else:
+                        has_data = cur in data_days_set
+                        is_sel = st.session_state.cal_day == cur
+                        if st.button(
+                            str(cur.day),
+                            key=f"cal_d_{cur.isoformat()}",
+                            use_container_width=True,
+                            type="primary" if is_sel else "secondary",
+                            help=("report" if has_data else None),
+                        ):
+                            st.session_state.cal_day = cur
+                            st.session_state.cal_week = week_id(cur)
+                            st.session_state.cal_year = cur.year
+                            st.session_state.cal_month = cur.month
+                            for k in ("cal_day", "cal_week", "cal_view"):
+                                if k in st.query_params:
+                                    del st.query_params[k]
+                            st.rerun()
+                cur += timedelta(days=1)
+        st.markdown("</div>", unsafe_allow_html=True)
+        st.caption(t(lang, "cal_hint"))
 
 # визуал круглых флагов + зелёных дней (клики уже через Streamlit)
 import json as _json
@@ -863,22 +883,22 @@ components.html(
         btn.style.color = 'transparent';
         btn.style.fontSize = '0';
         btn.style.borderRadius = '50%';
-        btn.style.width = '34px';
-        btn.style.height = '34px';
-        btn.style.minHeight = '34px';
+        btn.style.width = '30px';
+        btn.style.height = '30px';
+        btn.style.minHeight = '30px';
         btn.style.padding = '0';
         btn.style.overflow = 'hidden';
       }});
-      // дни: компакт + зелёные report
+      // дни: ещё компактнее + зелёные report
       doc.querySelectorAll('button[data-testid="baseButton-secondary"], button[data-testid="baseButton-primary"]').forEach(function (btn) {{
         const label = (btn.innerText || '').trim();
         if (!/^\\d{{1,2}}$/.test(label)) return;
-        btn.style.minHeight = '28px';
-        btn.style.height = '28px';
+        btn.style.minHeight = '20px';
+        btn.style.height = '20px';
         btn.style.padding = '0';
-        btn.style.fontSize = '12px';
+        btn.style.fontSize = '10px';
         btn.style.boxShadow = 'none';
-        btn.style.borderRadius = '4px';
+        btn.style.borderRadius = '3px';
         const tip = (btn.getAttribute('aria-label') || btn.getAttribute('title') || '');
         const isPrimary = (btn.getAttribute('data-testid') || '').indexOf('primary') >= 0;
         if (!isPrimary && tip.indexOf('report') >= 0) {{
