@@ -266,19 +266,19 @@ a.cal-cell:hover { filter: brightness(0.96); color: inherit; }
   pointer-events: none;
 }
 /* календарь: только колонка шапки; сильно ужат под «красный квадрат» */
-div[data-testid="column"]:has(.akela-cal-panel) [data-testid="stVerticalBlock"] {
+div[data-testid="column"]:has(.akela-cal-root) [data-testid="stVerticalBlock"] {
   gap: 0.12rem !important;
 }
-div[data-testid="column"]:has(.akela-cal-panel) [data-testid="stElementContainer"],
-div[data-testid="column"]:has(.akela-cal-panel) .element-container {
+div[data-testid="column"]:has(.akela-cal-root) [data-testid="stElementContainer"],
+div[data-testid="column"]:has(.akela-cal-root) .element-container {
   margin-bottom: 0 !important;
 }
-div[data-testid="column"]:has(.akela-cal-panel) .akela-section-label {
+div[data-testid="column"]:has(.akela-cal-root) .akela-section-label {
   font-size: 0.58rem !important;
   letter-spacing: 0.1em !important;
   margin: 0 0 0.1rem !important;
 }
-div[data-testid="column"]:has(.akela-cal-panel) .cal-head-row {
+div[data-testid="column"]:has(.akela-cal-root) .cal-head-row {
   display: grid;
   grid-template-columns: 0.7fr repeat(7, 1fr);
   gap: 1px;
@@ -289,21 +289,21 @@ div[data-testid="column"]:has(.akela-cal-panel) .cal-head-row {
   line-height: 1.1;
   margin: 0 0 1px;
 }
-div[data-testid="column"]:has(.akela-cal-panel) div[data-testid="stHorizontalBlock"] {
+div[data-testid="column"]:has(.akela-cal-root) div[data-testid="stHorizontalBlock"] {
   gap: 1px !important;
   flex-wrap: nowrap !important;
 }
-div[data-testid="column"]:has(.akela-cal-panel) div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
+div[data-testid="column"]:has(.akela-cal-root) div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
   min-width: 0 !important;
   flex: 1 1 0 !important;
 }
-div[data-testid="column"]:has(.akela-cal-panel) .stButton {
+div[data-testid="column"]:has(.akela-cal-root) .stButton {
   margin: 0 !important;
   min-height: 0 !important;
 }
-div[data-testid="column"]:has(.akela-cal-panel) button[data-testid="baseButton-secondary"],
-div[data-testid="column"]:has(.akela-cal-panel) button[data-testid="baseButton-primary"],
-div[data-testid="column"]:has(.akela-cal-panel) .stButton > button {
+div[data-testid="column"]:has(.akela-cal-root) button[data-testid="baseButton-secondary"],
+div[data-testid="column"]:has(.akela-cal-root) button[data-testid="baseButton-primary"],
+div[data-testid="column"]:has(.akela-cal-root) .stButton > button {
   min-height: 16px !important;
   height: 16px !important;
   max-height: 16px !important;
@@ -317,27 +317,27 @@ div[data-testid="column"]:has(.akela-cal-panel) .stButton > button {
   letter-spacing: 0 !important;
   transform: none !important;
 }
-div[data-testid="column"]:has(.akela-cal-panel) button[data-testid="baseButton-secondary"] {
+div[data-testid="column"]:has(.akela-cal-root) button[data-testid="baseButton-secondary"] {
   background: #EEF2F6 !important;
   border: 1px solid transparent !important;
   color: #1A2332 !important;
 }
-div[data-testid="column"]:has(.akela-cal-panel) button[kind="primary"],
-div[data-testid="column"]:has(.akela-cal-panel) button[data-testid="baseButton-primary"] {
+div[data-testid="column"]:has(.akela-cal-root) button[kind="primary"],
+div[data-testid="column"]:has(.akela-cal-root) button[data-testid="baseButton-primary"] {
   background: #3E4197 !important;
   border: 1px solid #2A2D7A !important;
   color: #fff !important;
   background-image: none !important;
 }
-div[data-testid="column"]:has(.akela-cal-panel) button[data-testid="baseButton-secondary"][aria-label*="report"],
-div[data-testid="column"]:has(.akela-cal-panel) button[title*="report"],
-div[data-testid="column"]:has(.akela-cal-panel) .stTooltipHoverTarget:has([aria-label*="report"]) button[data-testid="baseButton-secondary"] {
+div[data-testid="column"]:has(.akela-cal-root) button[data-testid="baseButton-secondary"][aria-label*="report"],
+div[data-testid="column"]:has(.akela-cal-root) button[title*="report"],
+div[data-testid="column"]:has(.akela-cal-root) .stTooltipHoverTarget:has([aria-label*="report"]) button[data-testid="baseButton-secondary"] {
   background: #C6F6D5 !important;
   border: 1px solid #1F7A4C !important;
   color: #14532d !important;
 }
-div[data-testid="column"]:has(.akela-cal-panel) .stCaption,
-div[data-testid="column"]:has(.akela-cal-panel) [data-testid="stCaptionContainer"] {
+div[data-testid="column"]:has(.akela-cal-root) .stCaption,
+div[data-testid="column"]:has(.akela-cal-root) [data-testid="stCaptionContainer"] {
   font-size: 0.62rem !important;
   margin: 0.15rem 0 0 !important;
   padding: 0 !important;
@@ -701,38 +701,6 @@ with top_logo:
         st.image(str(LOGO_PATH), width=72 if _mobile else 100)
     st.caption(t(lang, "subtitle"))
 
-
-def _app_base_url() -> str:
-    try:
-        if hasattr(st, "context") and getattr(st.context, "headers", None):
-            host = str(st.context.headers.get("Host") or "").strip()
-            proto = str(st.context.headers.get("X-Forwarded-Proto") or "https").split(",")[0].strip()
-            if host:
-                return f"{proto}://{host}/"
-    except Exception:
-        pass
-    # fallback: Streamlit Cloud app (чтобы iframe-ссылки не уходили на about:srcdoc)
-    return "https://akela-group-normativy.streamlit.app/"
-
-
-def _qp_href(**updates) -> str:
-    """Абсолютный URL приложения с query — клики из iframe через target=_parent."""
-    flat: dict[str, str] = {}
-    for k in st.query_params:
-        v = st.query_params.get(k)
-        if isinstance(v, list):
-            v = v[0] if v else ""
-        flat[str(k)] = str(v)
-    for k, v in updates.items():
-        if v is None:
-            flat.pop(str(k), None)
-        else:
-            flat[str(k)] = str(v)
-    q = urlencode(flat)
-    base = _app_base_url()
-    return f"{base}?{q}" if q else base
-
-
 _flag_emoji = {"uz": "🇺🇿", "ru": "🇷🇺", "en": "🇬🇧"}
 
 with top_lang:
@@ -754,7 +722,6 @@ with top_lang:
                     st.session_state.lang = code
                     st.query_params["lang"] = code
                     st.rerun()
-    # круги + запасной JS (если :has не сработает)
     components.html(
         """
 <script>
@@ -773,8 +740,7 @@ with top_lang:
         btn.style.fontSize = '1.15rem';
         btn.style.lineHeight = '1';
         btn.style.overflow = 'hidden';
-        btn.style.boxShadow = (btn.getAttribute('data-testid')||'').indexOf('primary')>=0
-          ? '0 0 0 2px rgba(62,65,151,0.25)' : 'none';
+        btn.style.background = '#fff';
       });
     }
     paint();
@@ -827,6 +793,13 @@ div[data-testid="column"]:has(.lang-flags-mark) button[kind="primary"] {
         unsafe_allow_html=True,
     )
 
+
+def _clear_cal_qp() -> None:
+    for k in ("cal_day", "cal_week", "cal_view", "cal_year", "cal_month"):
+        if k in st.query_params:
+            del st.query_params[k]
+
+
 with top_cal:
     cal_y, cal_m = st.session_state.cal_year, st.session_state.cal_month
     month_key = f"{cal_y:04d}-{cal_m:02d}"
@@ -836,108 +809,159 @@ with top_cal:
     month_label = f"{month_name(lang, cal_m)} {cal_y}"
     wd = weekday_labels(lang)
 
-    _pm, _py = (cal_m - 1, cal_y)
-    if _pm < 1:
-        _pm, _py = 12, cal_y - 1
-    _nm, _ny = (cal_m + 1, cal_y)
-    if _nm > 12:
-        _nm, _ny = 1, cal_y + 1
-
-    href_prev = _qp_href(
-        cal_year=_py, cal_month=_pm, cal_view="month", cal_day=None, cal_week=None
-    )
-    href_next = _qp_href(
-        cal_year=_ny, cal_month=_nm, cal_view="month", cal_day=None, cal_week=None
-    )
-    href_month = _qp_href(
-        cal_year=cal_y, cal_month=cal_m, cal_view="month", cal_day=None, cal_week=None
-    )
-
-    head = (
-        '<div class="row head"><span class="w">'
-        + (t(lang, "week_col")[:1])
-        + "</span>"
-        + "".join(f"<span>{lab[:2]}</span>" for lab in wd)
-        + "</div>"
-    )
-    weeks_html = []
-    for wid, ws, we in weeks_in_month(cal_y, cal_m):
-        week_sel = sel_week == wid and sel_day is None
-        week_href = _qp_href(cal_week=wid, cal_day=None, cal_view=None)
-        cells = [
-            f'<a class="cell week{" sel" if week_sel else ""}" href="{week_href}" target="_parent">'
-            f'{wid.split("-W")[-1]}</a>'
-        ]
-        cur = ws
-        for di in range(7):
-            in_month = cur.month == cal_m and cur.year == cal_y
-            if not in_month:
-                cells.append('<span class="cell mute">·</span>')
-            else:
-                has = cur in data_days_set
-                is_sel = sel_day == cur
-                cls = "cell day"
-                if has:
-                    cls += " report"
-                if is_sel:
-                    cls += " sel"
-                day_href = _qp_href(
-                    cal_day=cur.isoformat(), cal_week=None, cal_view=None
-                )
-                cells.append(
-                    f'<a class="{cls}" href="{day_href}" target="_parent">{cur.day}</a>'
-                )
-            cur += timedelta(days=1)
-        weeks_html.append('<div class="row">' + "".join(cells) + "</div>")
-
     st.markdown(
-        f'<p class="akela-section-label" style="margin:0 0 0.15rem;text-align:center">'
+        f'<p class="akela-section-label akela-cal-root" style="margin:0 0 0.15rem;text-align:center">'
         f'{t(lang, "calendar")}</p>',
         unsafe_allow_html=True,
     )
+
+    # навигация месяца — Streamlit-кнопки (клики работают как у флагов)
+    nav_l, nav_c, nav_r = st.columns([0.7, 3.6, 0.7])
+    with nav_l:
+        if st.button("‹", use_container_width=True, key="cal_prev"):
+            m = st.session_state.cal_month - 1
+            y = st.session_state.cal_year
+            if m < 1:
+                m, y = 12, y - 1
+            st.session_state.cal_month = m
+            st.session_state.cal_year = y
+            st.session_state.cal_week = None
+            st.session_state.cal_day = None
+            _clear_cal_qp()
+            st.rerun()
+    with nav_c:
+        month_view_active = sel_week is None and sel_day is None
+        if st.button(
+            month_label,
+            use_container_width=True,
+            key="cal_month_title",
+            type="primary" if month_view_active else "secondary",
+        ):
+            st.session_state.cal_week = None
+            st.session_state.cal_day = None
+            _clear_cal_qp()
+            st.rerun()
+    with nav_r:
+        if st.button("›", use_container_width=True, key="cal_next"):
+            m = st.session_state.cal_month + 1
+            y = st.session_state.cal_year
+            if m > 12:
+                m, y = 1, y + 1
+            st.session_state.cal_month = m
+            st.session_state.cal_year = y
+            st.session_state.cal_week = None
+            st.session_state.cal_day = None
+            _clear_cal_qp()
+            st.rerun()
+
+    st.markdown(
+        '<div class="cal-head-row">'
+        f'<span>{t(lang, "week_col")[:1]}</span>'
+        + "".join(f"<span>{lab[:2]}</span>" for lab in wd)
+        + "</div>",
+        unsafe_allow_html=True,
+    )
+
+    for wid, ws, we in weeks_in_month(cal_y, cal_m):
+        row = st.columns([0.7] + [1] * 7)
+        week_sel = sel_week == wid and sel_day is None
+        with row[0]:
+            if st.button(
+                wid.split("-W")[-1],
+                key=f"cal_w_{wid}",
+                use_container_width=True,
+                type="primary" if week_sel else "secondary",
+            ):
+                st.session_state.cal_week = wid
+                st.session_state.cal_day = None
+                _clear_cal_qp()
+                st.rerun()
+        cur = ws
+        for di in range(7):
+            in_month = cur.month == cal_m and cur.year == cal_y
+            with row[di + 1]:
+                if not in_month:
+                    st.button(
+                        "·",
+                        key=f"cal_pad_{wid}_{di}",
+                        use_container_width=True,
+                        disabled=True,
+                    )
+                else:
+                    has_data = cur in data_days_set
+                    is_sel = sel_day == cur
+                    if st.button(
+                        str(cur.day),
+                        key=f"cal_d_{cur.isoformat()}",
+                        use_container_width=True,
+                        type="primary" if is_sel else "secondary",
+                        help=("report" if has_data else None),
+                    ):
+                        st.session_state.cal_day = cur
+                        st.session_state.cal_week = week_id(cur)
+                        st.session_state.cal_year = cur.year
+                        st.session_state.cal_month = cur.month
+                        _clear_cal_qp()
+                        st.rerun()
+            cur += timedelta(days=1)
+
+    st.caption(t(lang, "cal_hint"))
+
+    # компактный вид как у HTML-календаря (запасной JS)
     components.html(
-        f"""
-<style>
-  html,body {{ margin:0; padding:0; background:transparent; font-family: Onest, system-ui, sans-serif; }}
-  .cal {{ width:100%; max-width:280px; margin:0 auto; }}
-  .nav {{ display:grid; grid-template-columns:28px 1fr 28px; gap:4px; margin-bottom:4px; }}
-  .nav a {{
-    height:24px; border:1px solid #D5E0EA; border-radius:4px; background:#EEF2F6;
-    color:#1A2332; font-size:11px; font-weight:600; cursor:pointer; padding:0;
-    display:flex; align-items:center; justify-content:center; text-decoration:none !important;
-  }}
-  .nav a.month {{ background:#3E4197; color:#fff; border-color:#2A2D7A; }}
-  .row {{
-    display:grid; grid-template-columns:22px repeat(7, 1fr); gap:2px; margin-bottom:2px;
-  }}
-  .row.head span {{
-    text-align:center; font-size:9px; color:#7A8B9C; font-weight:600; line-height:14px;
-  }}
-  .cell {{
-    height:18px; border-radius:3px; border:1px solid transparent; background:#EEF2F6;
-    color:#1A2332; font-size:10px; font-weight:600; display:flex; align-items:center;
-    justify-content:center; padding:0; cursor:pointer; line-height:1; white-space:nowrap;
-    text-decoration:none !important; box-sizing:border-box;
-  }}
-  a.cell {{ width:100%; }}
-  .cell.mute {{ background:transparent; color:#C5CDD6; cursor:default; }}
-  .cell.report {{ background:#C6F6D5; border-color:#1F7A4C; color:#14532d; }}
-  .cell.sel {{ background:#3E4197 !important; border-color:#2A2D7A !important; color:#fff !important; }}
-  .cell.week {{ background:#F4F7FA; font-size:9px; }}
-  .hint {{ margin-top:3px; font-size:10px; color:#7A8B9C; text-align:center; }}
-</style>
-<div class="cal">
-  <div class="nav">
-    <a href="{href_prev}" target="_parent">‹</a>
-    <a class="month" href="{href_month}" target="_parent">{month_label}</a>
-    <a href="{href_next}" target="_parent">›</a>
-  </div>
-  {head}
-  {"".join(weeks_html)}
-  <div class="hint">{t(lang, "cal_hint")}</div>
-</div>
+        """
+<script>
+(function(){
+  try {
+    var doc = window.parent.document;
+    function paintCal(){
+      var label = null;
+      doc.querySelectorAll('p.akela-cal-root, .akela-cal-root').forEach(function(el){ label = el; });
+      if (!label) return;
+      // ищем колонку: ближайший data-testid=column предок
+      var col = label.closest('[data-testid="column"]');
+      if (!col) return;
+      col.querySelectorAll('button').forEach(function(btn){
+        var t = (btn.innerText || '').trim();
+        // не трогаем флаги
+        if (t === '🇺🇿' || t === '🇷🇺' || t === '🇬🇧') return;
+        btn.style.minHeight = '18px';
+        btn.style.height = '18px';
+        btn.style.maxHeight = '18px';
+        btn.style.padding = '0';
+        btn.style.fontSize = '10px';
+        btn.style.lineHeight = '1';
+        btn.style.whiteSpace = 'nowrap';
+        btn.style.overflow = 'hidden';
+        btn.style.borderRadius = '3px';
+        btn.style.boxShadow = 'none';
+        btn.style.transform = 'none';
+        var tip = (btn.getAttribute('aria-label') || btn.getAttribute('title') || '');
+        var isPrimary = (btn.getAttribute('data-testid') || '').indexOf('primary') >= 0;
+        if (!isPrimary && tip.indexOf('report') >= 0) {
+          btn.style.background = '#C6F6D5';
+          btn.style.border = '1px solid #1F7A4C';
+          btn.style.color = '#14532d';
+        } else if (!isPrimary && t !== '‹' && t !== '›' && !/20\\d{2}/.test(t)) {
+          btn.style.background = '#EEF2F6';
+          btn.style.color = '#1A2332';
+        }
+      });
+      col.querySelectorAll('[data-testid="stHorizontalBlock"]').forEach(function(row){
+        row.style.gap = '2px';
+      });
+      col.querySelectorAll('[data-testid="stVerticalBlock"]').forEach(function(vb){
+        vb.style.gap = '0.12rem';
+      });
+    }
+    paintCal();
+    setTimeout(paintCal, 150);
+    setTimeout(paintCal, 450);
+  } catch(e) {}
+})();
+</script>
 """,
-        height=168,
+        height=0,
     )
 
 
