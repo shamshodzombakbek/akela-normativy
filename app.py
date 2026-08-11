@@ -1316,13 +1316,12 @@ with col1:
         textfont_color="#1A2332",
         pull=[0.02] * len(submit_stats),
     )
+    _pie_layout = {k: v for k, v in PLOTLY_LAYOUT.items() if k not in {"margin", "title"}}
     pie.update_layout(
-        **PLOTLY_LAYOUT,
+        **_pie_layout,
         showlegend=True,
         legend=dict(orientation="h", y=-0.12),
         margin=dict(l=16, r=16, t=48, b=48),
-        uniformtext_minsize=10,
-        uniformtext_mode="hide",
     )
     ev_submit = _plotly_chart_select(pie, key="pie_submit_click")
 
@@ -1349,12 +1348,10 @@ with col2:
         pull=[0.02] * len(stats),
     )
     pie2.update_layout(
-        **PLOTLY_LAYOUT,
+        **_pie_layout,
         showlegend=True,
         legend=dict(orientation="h", y=-0.12),
         margin=dict(l=16, r=16, t=48, b=56),
-        uniformtext_minsize=10,
-        uniformtext_mode="hide",
     )
     ev_cats = _plotly_chart_select(pie2, key="pie_cats_click")
 
