@@ -143,6 +143,44 @@ def load_uploaded_employees(uploaded_files, uploaded_by: str = ""):
     return pd.DataFrame(employees)
 
 
+def load_excel_reports_from_blobs(file_blobs: dict[str, bytes]) -> pd.DataFrame:
+    """Читает Normativ Excel из словаря имя → байты (Диск / REST)."""
+    from io import BytesIO
+
+    employees = []
+    skipped = []
+
+    names = sorted(file_blobs.keys(), reverse=True)
+    normativ_names = [n for n in names if is_normativ_report_filename(n)]
+    candidates = normativ_names or names
+
+    for name in candidates:
+        if normativ_names and not is_normativ_report_filename(name):
+            skipped.append(name)
+            continue
+        blob = file_blobs.get(name)
+        if not blob:
+            continue
+        percent = extract_overall_percent(BytesIO(blob))
+        if percent is None:
+            skipped.append(name)
+            continue
+        employees.append(
+            {
+                "Сотрудник": employee_name_from_normativ_file(name),
+                "KPI": percent,
+                "Категория": kpi_category(percent),
+                "Файл": name,
+            }
+        )
+
+    df = pd.DataFrame(employees)
+    if not df.empty:
+        df = df.sort_values("KPI", ascending=False).reset_index(drop=True)
+    df.attrs["skipped_non_reports"] = skipped
+    return df
+
+
 def load_excel_reports_from_dir(folder: str | Path) -> pd.DataFrame:
     """
     Читает Excel-отчёты Normativ_*.

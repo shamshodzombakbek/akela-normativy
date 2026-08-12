@@ -22,35 +22,6 @@ LOGO_PATH = ROOT / "assets" / "akela-logo.png"
 FAVICON_PATH = ROOT / "assets" / "akela-favicon.png"
 
 
-def _is_streamlit_cloud() -> bool:
-    return bool(
-        os.getenv("STREAMLIT_RUNTIME_ENVIRONMENT") == "cloud"
-        or os.getenv("IS_STREAMLIT_CLOUD")
-        or Path("/mount/src").exists()
-    )
-
-
-def _bitrix_browser_ready() -> tuple[bool, str]:
-    """Локально: Selenium + логин в .env. На Cloud — недоступно."""
-    if _is_streamlit_cloud():
-        return False, "На streamlit.app автозагрузка из Битрикс недоступна — загрузите Excel вручную."
-    try:
-        from dotenv import load_dotenv
-
-        load_dotenv(ROOT / ".env", override=True)
-    except Exception:
-        pass
-    login = os.getenv("BITRIX_LOGIN", "").strip()
-    password = os.getenv("BITRIX_PASSWORD", "").strip()
-    if not login or not password:
-        return False, "В .env нужны BITRIX_LOGIN и BITRIX_PASSWORD."
-    try:
-        import selenium  # noqa: F401
-        import webdriver_manager  # noqa: F401
-    except ImportError:
-        return False, "Установите локально: pip install -r requirements-local.txt"
-    return True, ""
-
 st.set_page_config(
     page_title="Akela · Отчёты по нормативам",
     page_icon=str(FAVICON_PATH if FAVICON_PATH.exists() else LOGO_PATH),
@@ -1229,6 +1200,95 @@ if not _admin_unlocked:
         else:
             st.caption(f"· {_vnote}")
 
+# ---- Битрикс24: нормативы с Диска (только админ) ----
+if _admin_unlocked:
+    from bitrix_disk import disk_folder_url_hint
+    from bitrix_fetch import fetch_normativs
+    from schedule import bitrix_target_day
+
+    st.markdown(
+        f'<p class="akela-section-label">Битрикс24 · нормативы</p>',
+        unsafe_allow_html=True,
+    )
+    _fetch_window_day = selected_day if selected_day is not None else current_slot
+    _bitrix_day = bitrix_target_day(_fetch_window_day)
+    st.caption(
+        f"Слот дашборда: **{_fetch_window_day.strftime('%d.%m.%Y')}** · "
+        f"файлы на Диске за: **{_bitrix_day.strftime('%d.%m.%Y')}** · "
+        f"`{disk_folder_url_hint()}`"
+    )
+    st.info(
+        "Excel кладут на **Общий диск Битрикс24** (папка по дате). "
+        "Автозагрузка по расписанию — GitHub Actions. "
+        "Или любой сотрудник может запустить скрипт на своём ПК (см. ниже)."
+    )
+
+    with st.expander("Скачать программу для Windows (.exe)"):
+        st.markdown(
+            """
+**AkelaNormativSync** — один `.exe`, синхронизирует дашборд с Диском Битрикс24.
+
+1. Скачайте **AkelaNormativSync-Windows.zip** из [Actions → Build Windows desktop app](https://github.com/shamshodzombakbek/akela-normativy/actions/workflows/build-desktop.yml)  
+   (последний успешный запуск → Artifacts).
+2. Распакуйте zip.
+3. Запустите `AkelaNormativSync.exe` → введите webhook, Google folder ID, JSON-ключ → **Сохранить**.
+4. Запустите `install_windows_autostart.bat` — программа будет **сама работать в фоне** при входе в Windows.
+
+Настройки: `%APPDATA%\\AkelaNormativSync\\` · журнал: `sync.log`
+            """
+        )
+
+    with st.expander("Запуск скриптом (терминал / Mac)"):
+        st.markdown(
+            """
+1. Скачайте проект с GitHub (или скопируйте папку).
+2. Скопируйте `env.example` → `.env`, вставьте `BITRIX_WEBHOOK_URL` и Google secrets.
+3. Положите Excel на Диск: `Akela Normativy / YYYY-MM-DD /`.
+4. Запустите один из файлов ниже **или** в терминале: `python run_fetch.py --force`
+            """
+        )
+        _script_dir = ROOT / "scripts"
+        _dl_files = [
+            ("run_fetch.py", ROOT / "run_fetch.py", "text/x-python"),
+            ("env.example", ROOT / "env.example", "text/plain"),
+            ("run_fetch.bat (Windows)", _script_dir / "run_fetch.bat", "application/octet-stream"),
+            ("run_fetch.command (Mac)", _script_dir / "run_fetch.command", "application/octet-stream"),
+        ]
+        for label, path, mime in _dl_files:
+            if path.is_file():
+                st.download_button(
+                    f"Скачать {label}",
+                    data=path.read_bytes(),
+                    file_name=path.name,
+                    mime=mime,
+                    key=f"dl_{path.name}",
+                )
+        st.caption(
+            "`.bat` / `.command` нужно положить в папку `scripts/` проекта. "
+            "На Mac для `.command`: правый клик → Открыть (один раз)."
+        )
+
+    if st.button("Загрузить с Диска и показать всем", type="primary", key="bitrix_fetch_btn"):
+        try:
+            with st.spinner("Читаю Диск Битрикс24…"):
+                _fetch_result = fetch_normativs(
+                    _fetch_window_day,
+                    publish=True,
+                    replace=True,
+                )
+            for _m in _fetch_result.get("messages") or []:
+                st.write(f"· {_m}")
+            if _fetch_result.get("ok"):
+                st.success(f"Готово: {_fetch_result.get('count', 0)} записей.")
+                st.rerun()
+            else:
+                st.error(
+                    f"На Диске нет Excel за {_bitrix_day.strftime('%d.%m.%Y')}. "
+                    "Положите Normativ_*.xlsx в подпапку дня или загрузите через форму ниже."
+                )
+        except Exception as exc:
+            st.error(f"Ошибка: `{exc}`")
+
 # ---- Загрузка Excel (только админ ?admin=, без ограничений по дате) ----
 if _admin_unlocked:
     st.markdown(
@@ -1315,6 +1375,14 @@ if _admin_unlocked:
                         force=True,
                         file_blobs=file_blobs,
                     )
+                    try:
+                        from bitrix_disk import upload_normativs_to_disk
+                        from schedule import bitrix_target_day
+
+                        disk_day = bitrix_target_day(target_ref)
+                        upload_normativs_to_disk(disk_day, file_blobs)
+                    except Exception as disk_exc:
+                        st.warning(f"На Диск Битрикс не загружено: {disk_exc}")
                 else:
                     df_pub, meta = publish_period_snapshot(
                         incoming,

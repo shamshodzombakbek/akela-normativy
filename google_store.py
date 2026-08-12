@@ -106,9 +106,13 @@ def _service_account_info() -> dict:
                     return dict(raw)
                 raw_text = str(raw)
     except Exception as exc:
-                raise RuntimeError(f"Не удалось прочитать Secrets Google: {exc}") from exc
+        raise RuntimeError(f"Не удалось прочитать Secrets Google: {exc}") from exc
 
     if raw_text is None:
+        sa_path = os.getenv("GOOGLE_SERVICE_ACCOUNT_PATH", "").strip()
+        if sa_path and os.path.isfile(sa_path):
+            with open(sa_path, encoding="utf-8") as f:
+                return json.load(f)
         path = os.path.join(os.path.dirname(__file__), "google_service_account.json")
         if os.path.isfile(path):
             with open(path, encoding="utf-8") as f:

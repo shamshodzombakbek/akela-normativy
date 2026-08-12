@@ -1,0 +1,32 @@
+name: Fetch normativy from Bitrix Disk
+
+on:
+  schedule:
+    # 16:00–18:30 Asia/Tashkent ≈ 11:00–13:30 UTC (пн–сб)
+    - cron: "10,20,30,40,50 11-13 * * 1-6"
+    - cron: "0 14 * * 1-6"
+  workflow_dispatch:
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Fetch from Bitrix Disk and publish
+        env:
+          BITRIX_WEBHOOK_URL: ${{ secrets.BITRIX_WEBHOOK_URL }}
+          BITRIX_SHARED_STORAGE_ID: ${{ secrets.BITRIX_SHARED_STORAGE_ID }}
+          BITRIX_NORMATIV_FOLDER: ${{ secrets.BITRIX_NORMATIV_FOLDER }}
+          BITRIX_NORMATIV_FOLDER_ID: ${{ secrets.BITRIX_NORMATIV_FOLDER_ID }}
+          GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+        run: python fetch_scheduler.py
