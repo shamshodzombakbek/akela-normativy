@@ -637,6 +637,8 @@ from shared_store import (
     weeks_in_month_with_data,
     list_available_weeks,
     list_available_months,
+    get_report_bytes,
+    get_report_bytes_any_period,
 )
 
 import streamlit.components.v1 as components
@@ -734,31 +736,50 @@ def _find_report_file(filename: str, day_hint: str | None = None) -> Path | None
     return _scan_dir(ROOT / "downloads" / "test_upload")
 
 
-def _render_report_page(filename: str, day_hint: str | None = None) -> None:
-    fname = Path(filename).name
+def _load_report_bytes(filename: str, day_hint: str | None = None) -> tuple[bytes | None, str]:
+    """Сначала shared_kpi (облако), потом локальный downloads/."""
+    fname = Path(str(filename or "").strip()).name
+    if not fname:
+        return None, fname
+    if day_hint:
+        data = get_report_bytes(fname, period_kind="day", period_key=day_hint)
+        if data:
+            return data, fname
+    data = get_report_bytes_any_period(fname)
+    if data:
+        return data, fname
     path = _find_report_file(fname, day_hint)
+    if path and path.is_file():
+        return path.read_bytes(), path.name
+    return None, fname
+
+
+def _render_report_page(filename: str, day_hint: str | None = None) -> None:
+    raw, fname = _load_report_bytes(filename, day_hint)
     st.markdown(
         f'<p class="akela-section-label">Отчёт · {fname}</p>',
         unsafe_allow_html=True,
     )
     back_lang = str(st.query_params.get("lang") or st.session_state.get("lang") or "ru")
-    if not path:
+    if not raw:
         st.warning(
-            "Файл Excel на сервере не найден — в базе сохранены только имя и %. "
-            "Повторите загрузку или откройте локальную копию."
+            "Файл Excel не найден. Для старых загрузок сохранены только имя и % — "
+            "загрузите отчёты заново через админку («Показать всем»)."
         )
         st.link_button("← К дашборду", f"?lang={back_lang}")
         return
 
     st.download_button(
         "Скачать Excel",
-        data=path.read_bytes(),
-        file_name=path.name,
+        data=raw,
+        file_name=fname if fname.lower().endswith((".xlsx", ".xls")) else f"{fname}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         type="primary",
     )
     try:
-        preview = pd.read_excel(path, header=None)
+        import io
+
+        preview = pd.read_excel(io.BytesIO(raw), header=None)
         st.markdown("**Предпросмотр**")
         st.dataframe(preview.head(40), use_container_width=True, hide_index=True)
     except Exception as exc:
@@ -1266,8 +1287,10 @@ if _admin_unlocked:
         if upload_kind == "day" and isinstance(target_ref, date):
             day_store = ROOT / "downloads" / "reports" / target_ref.isoformat()
             day_store.mkdir(parents=True, exist_ok=True)
+        file_blobs: dict[str, bytes] = {}
         for f in uploaded_files:
             blob = f.getvalue()
+            file_blobs[f.name] = blob
             (local_dir / f.name).write_bytes(blob)
             if day_store is not None:
                 (day_store / f.name).write_bytes(blob)
@@ -1290,6 +1313,7 @@ if _admin_unlocked:
                         replace=False,
                         allow_outside_window=True,
                         force=True,
+                        file_blobs=file_blobs,
                     )
                 else:
                     df_pub, meta = publish_period_snapshot(
@@ -1299,6 +1323,7 @@ if _admin_unlocked:
                         replace=False,
                         allow_outside_window=True,
                         force=True,
+                        file_blobs=file_blobs,
                     )
             st.success(
                 f"Сохранено ({upload_kind_label.lower()}): "

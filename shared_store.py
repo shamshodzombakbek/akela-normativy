@@ -6,6 +6,7 @@ import base64
 import json
 import os
 from datetime import date, datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
@@ -297,6 +298,92 @@ def _df_to_employees(df: pd.DataFrame) -> list[dict]:
     return records
 
 
+MAX_REPORT_BYTES = 2 * 1024 * 1024  # 2 MB на файл в shared_kpi.json
+
+
+def _encode_file_blobs(blobs: dict[str, bytes] | None) -> dict[str, str]:
+    out: dict[str, str] = {}
+    if not blobs:
+        return out
+    for name, data in blobs.items():
+        fname = Path(str(name or "")).name
+        if not fname or not data:
+            continue
+        if len(data) > MAX_REPORT_BYTES:
+            continue
+        out[fname] = base64.b64encode(data).decode("ascii")
+    return out
+
+
+def _merge_slot_files(
+    existing: dict | None,
+    blobs: dict[str, bytes] | None,
+    *,
+    replace: bool,
+) -> dict[str, str]:
+    base: dict[str, str] = {}
+    if not replace and isinstance(existing, dict):
+        base = {str(k): str(v) for k, v in existing.items() if v}
+    base.update(_encode_file_blobs(blobs))
+    return base
+
+
+def _decode_report_b64(files_b64: dict | None, filename: str) -> bytes | None:
+    if not isinstance(files_b64, dict):
+        return None
+    fname = Path(str(filename or "").strip()).name
+    if not fname:
+        return None
+    raw = files_b64.get(fname)
+    if raw is None:
+        low = fname.casefold()
+        for k, v in files_b64.items():
+            if str(k).casefold() == low:
+                raw = v
+                break
+    if not raw:
+        return None
+    try:
+        return base64.b64decode(str(raw))
+    except Exception:
+        return None
+
+
+def get_report_bytes(
+    filename: str,
+    *,
+    period_kind: str = "day",
+    period_key: str | None = None,
+) -> bytes | None:
+    """Excel из shared_kpi (files_b64) для периода."""
+    fname = Path(str(filename or "").strip()).name
+    if not fname:
+        return None
+    store, _ = _load_raw_store()
+    kind = (period_kind or "day").strip().lower()
+    key = period_key or active_window_day().isoformat()
+    bucket = _period_bucket(store, kind)
+    slot = bucket.get(key) or {}
+    return _decode_report_b64(slot.get("files_b64"), fname)
+
+
+def get_report_bytes_any_period(filename: str) -> bytes | None:
+    """Ищет файл во всех слотах day/week/month."""
+    fname = Path(str(filename or "").strip()).name
+    if not fname:
+        return None
+    store, _ = _load_raw_store()
+    store = _ensure_period_buckets(store)
+    for kind in ("days", "weeks", "months"):
+        for slot in (store.get(kind) or {}).values():
+            if not isinstance(slot, dict):
+                continue
+            data = _decode_report_b64(slot.get("files_b64"), fname)
+            if data:
+                return data
+    return None
+
+
 def list_available_days(store: dict | None = None) -> list[date]:
     if store is None:
         store, _ = _load_raw_store()
@@ -437,6 +524,7 @@ def publish_period_snapshot(
     replace: bool = True,
     allow_outside_window: bool = False,
     force: bool = False,
+    file_blobs: dict[str, bytes] | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """
     Сохранить снимок периода.
@@ -452,6 +540,7 @@ def publish_period_snapshot(
             replace=replace,
             allow_outside_window=allow_outside_window,
             force=force,
+            file_blobs=file_blobs,
         )
 
     store, disk_meta = _load_raw_store()
@@ -486,11 +575,17 @@ def publish_period_snapshot(
     if not isinstance(preserved_overrides, dict):
         preserved_overrides = {}
 
+    files_b64 = _merge_slot_files(
+        existing_slot.get("files_b64"),
+        file_blobs,
+        replace=replace,
+    )
     bucket[key] = {
         "period_kind": kind,
         "period_key": key,
         "window_day": key,
         "employees": employees,
+        "files_b64": files_b64,
         "updated_at": now_s,
         "frozen": False,
         "seat_overrides": preserved_overrides,
@@ -552,6 +647,7 @@ def publish_day_snapshot(
     replace: bool = True,
     allow_outside_window: bool = False,
     force: bool = False,
+    file_blobs: dict[str, bytes] | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """
     Сохранить снимок за слот.
@@ -607,10 +703,16 @@ def publish_day_snapshot(
         preserved_overrides = {}
 
     keep_frozen = bool(existing_slot.get("frozen")) if force else False
+    files_b64 = _merge_slot_files(
+        existing_slot.get("files_b64"),
+        file_blobs,
+        replace=replace,
+    )
     store["days"][key] = {
         "window_day": key,
         "bitrix_day": bitrix_target_day(day).isoformat(),
         "employees": employees,
+        "files_b64": files_b64,
         "updated_at": now_s,
         "frozen": keep_frozen,
         "seat_overrides": preserved_overrides,

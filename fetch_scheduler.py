@@ -57,7 +57,15 @@ def main() -> int:
         print("ERROR: could not parse A1 percents")
         return 1
 
-    df, meta = publish_day_snapshot(incoming, window_day=window_day, replace=True)
+    file_blobs: dict[str, bytes] = {}
+    for p in files:
+        path = Path(p) if not isinstance(p, Path) else p
+        if path.is_file():
+            file_blobs[path.name] = path.read_bytes()
+
+    df, meta = publish_day_snapshot(
+        incoming, window_day=window_day, replace=True, file_blobs=file_blobs or None
+    )
     print(f"saved rows={len(df)} updated_at={meta.get('updated_at')}")
     return 0
 
