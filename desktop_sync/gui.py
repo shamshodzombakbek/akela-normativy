@@ -27,7 +27,69 @@ from desktop_sync.config_store import (  # noqa: E402
 from desktop_sync.worker import run_sync_once  # noqa: E402
 
 APP_TITLE = "Akela · Синхронизация нормативов"
-APP_VERSION = "1.1"
+APP_VERSION = "1.2"
+
+
+def _bind_clipboard(entry: ttk.Entry) -> None:
+    """Ctrl+V/C/X/A и меню по правому клику — ttk.Entry на Windows часто без этого."""
+
+    def paste(_event=None):
+        try:
+            text = entry.clipboard_get()
+            if entry.selection_present():
+                entry.delete(tk.SEL_FIRST, tk.SEL_LAST)
+            entry.insert(tk.INSERT, text)
+        except tk.TclError:
+            pass
+        return "break"
+
+    def copy(_event=None):
+        try:
+            if entry.selection_present():
+                text = entry.selection_get()
+                entry.clipboard_clear()
+                entry.clipboard_append(text)
+        except tk.TclError:
+            pass
+        return "break"
+
+    def cut(_event=None):
+        copy()
+        try:
+            if entry.selection_present():
+                entry.delete(tk.SEL_FIRST, tk.SEL_LAST)
+        except tk.TclError:
+            pass
+        return "break"
+
+    def select_all(_event=None):
+        entry.select_range(0, tk.END)
+        entry.icursor(tk.END)
+        return "break"
+
+    for seq in ("<Control-v>", "<Control-V>", "<Shift-Insert>"):
+        entry.bind(seq, paste)
+    for seq in ("<Control-c>", "<Control-C>"):
+        entry.bind(seq, copy)
+    for seq in ("<Control-x>", "<Control-X>"):
+        entry.bind(seq, cut)
+    for seq in ("<Control-a>", "<Control-A>"):
+        entry.bind(seq, select_all)
+
+    menu = tk.Menu(entry, tearoff=0)
+    menu.add_command(label="Вырезать", command=cut)
+    menu.add_command(label="Копировать", command=copy)
+    menu.add_command(label="Вставить", command=paste)
+    menu.add_separator()
+    menu.add_command(label="Выделить всё", command=select_all)
+
+    def show_menu(event):
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+
+    entry.bind("<Button-3>", show_menu)
 
 
 class SyncApp(tk.Tk):
@@ -133,21 +195,25 @@ class SyncApp(tk.Tk):
         row = ttk.Frame(parent)
         row.pack(fill=tk.X, padx=8, pady=2)
         ttk.Label(row, text=label, width=22).pack(side=tk.LEFT)
-        ttk.Entry(row, textvariable=var).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        entry = ttk.Entry(row, textvariable=var)
+        entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        _bind_clipboard(entry)
 
     def _row_password(self, parent: ttk.LabelFrame) -> None:
         row = ttk.Frame(parent)
         row.pack(fill=tk.X, padx=8, pady=2)
         ttk.Label(row, text="Пароль Битрикс24", width=22).pack(side=tk.LEFT)
-        ttk.Entry(row, textvariable=self._password, show="•").pack(
-            side=tk.LEFT, fill=tk.X, expand=True
-        )
+        entry = ttk.Entry(row, textvariable=self._password, show="•")
+        entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        _bind_clipboard(entry)
 
     def _row_key(self, parent: ttk.LabelFrame) -> None:
         row = ttk.Frame(parent)
         row.pack(fill=tk.X, padx=8, pady=2)
         ttk.Label(row, text="Google JSON ключ", width=22).pack(side=tk.LEFT)
-        ttk.Entry(row, textvariable=self._key_path).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        entry = ttk.Entry(row, textvariable=self._key_path)
+        entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        _bind_clipboard(entry)
         ttk.Button(row, text="Обзор…", command=self._browse_key).pack(side=tk.LEFT, padx=4)
 
     def _browse_key(self) -> None:
