@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from datetime import date, datetime, timedelta
 from pathlib import Path
 import os
@@ -694,6 +696,75 @@ def _is_mobile() -> bool:
 
 _mobile = _is_mobile()
 
+
+def _find_report_file(filename: str, day_hint: str | None = None) -> Path | None:
+    """Ищет Excel-отчёт в downloads (reports / bitrix / uploads)."""
+    fname = Path(str(filename or "").strip()).name
+    if not fname or fname in {"(admin)", ""}:
+        return None
+
+    def _scan_dir(folder: Path) -> Path | None:
+        if not folder.is_dir():
+            return None
+        exact = folder / fname
+        if exact.is_file():
+            return exact
+        low = fname.casefold()
+        for p in folder.iterdir():
+            if p.is_file() and p.name.casefold() == low:
+                return p
+        return None
+
+    if day_hint:
+        for base_name in ("reports", "bitrix_reports"):
+            hit = _scan_dir(ROOT / "downloads" / base_name / day_hint)
+            if hit:
+                return hit
+
+    for base_name in ("reports", "bitrix_reports", "uploads"):
+        base = ROOT / "downloads" / base_name
+        if not base.is_dir():
+            continue
+        for sub in sorted(base.iterdir(), reverse=True):
+            if sub.is_dir():
+                hit = _scan_dir(sub)
+                if hit:
+                    return hit
+
+    return _scan_dir(ROOT / "downloads" / "test_upload")
+
+
+def _render_report_page(filename: str, day_hint: str | None = None) -> None:
+    fname = Path(filename).name
+    path = _find_report_file(fname, day_hint)
+    st.markdown(
+        f'<p class="akela-section-label">Отчёт · {fname}</p>',
+        unsafe_allow_html=True,
+    )
+    back_lang = str(st.query_params.get("lang") or st.session_state.get("lang") or "ru")
+    if not path:
+        st.warning(
+            "Файл Excel на сервере не найден — в базе сохранены только имя и %. "
+            "Повторите загрузку или откройте локальную копию."
+        )
+        st.link_button("← К дашборду", f"?lang={back_lang}")
+        return
+
+    st.download_button(
+        "Скачать Excel",
+        data=path.read_bytes(),
+        file_name=path.name,
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        type="primary",
+    )
+    try:
+        preview = pd.read_excel(path, header=None)
+        st.markdown("**Предпросмотр**")
+        st.dataframe(preview.head(40), use_container_width=True, hide_index=True)
+    except Exception as exc:
+        st.caption(f"Предпросмотр недоступен: {exc}")
+    st.link_button("← К дашборду", f"?lang={back_lang}")
+
 # ---- язык (uz / ru / en) ----
 if "lang" not in st.session_state:
     st.session_state.lang = str(st.query_params.get("lang") or "ru").strip().lower()
@@ -705,6 +776,14 @@ if "lang" in st.query_params:
     if qp_lang in {"ru", "uz", "en"} and qp_lang != lang:
         st.session_state.lang = qp_lang
         lang = qp_lang
+
+_report_q = str(st.query_params.get("report") or "").strip()
+if _report_q:
+    _render_report_page(
+        _report_q,
+        str(st.query_params.get("report_day") or "").strip() or None,
+    )
+    st.stop()
 
 
 # ---- календарь: по умолчанию сегодняшний активный день ----
@@ -1183,8 +1262,15 @@ if _admin_unlocked:
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         local_dir = ROOT / "downloads" / "uploads" / stamp
         local_dir.mkdir(parents=True, exist_ok=True)
+        day_store: Path | None = None
+        if upload_kind == "day" and isinstance(target_ref, date):
+            day_store = ROOT / "downloads" / "reports" / target_ref.isoformat()
+            day_store.mkdir(parents=True, exist_ok=True)
         for f in uploaded_files:
-            (local_dir / f.name).write_bytes(f.getvalue())
+            blob = f.getvalue()
+            (local_dir / f.name).write_bytes(blob)
+            if day_store is not None:
+                (day_store / f.name).write_bytes(blob)
             try:
                 f.seek(0)
             except Exception:
@@ -1539,32 +1625,57 @@ from utils import kpi_category as _kpi_cat
 
 has_uploads = not (df is None or df.empty or "KPI" not in getattr(df, "columns", []))
 
-# Для диаграмм: если загрузок нет — весь штат (уникальные) как «не сдал»
-if has_uploads:
+def _staff_display_name(row) -> str:
+    """Только имя из штатки; при пометке — «ФИО · юклатилган»."""
+    fio = str(row.get("ФИО") or "").strip()
+    note = str(row.get("Пометка") or "").strip()
+    if note.casefold() == "юклатилган":
+        return f"{fio} · юклатилган" if fio else "юклатилган"
+    return fio or "—"
+
+
+def _people_df_from_staff(staff: pd.DataFrame) -> pd.DataFrame:
+    """Обязанные места штатки для графика/таблицы — только имена (без должности)."""
+    if staff is None or staff.empty:
+        return pd.DataFrame(columns=["Сотрудник", "KPI", "Категория", "Файл", "ФИО", "Пометка", "Должность"])
+    required = staff[staff["Статус"] != "➖ Не обязан"].copy()
+    if required.empty:
+        return pd.DataFrame(columns=["Сотрудник", "KPI", "Категория", "Файл", "ФИО", "Пометка", "Должность"])
+    out = required.copy()
+    if "Категория" not in out.columns:
+        out["Категория"] = out["KPI"].map(
+            lambda x: kpi_category(float(x) if x is not None and str(x) != "" else None)
+        )
+    out["Сотрудник"] = out.apply(_staff_display_name, axis=1)
+    # одинаковые подписи (plotly) — невидимый разделитель, без должности
+    seen: dict[str, int] = {}
+    uniq = []
+    zw = "\u200b"
+    for lab in out["Сотрудник"].tolist():
+        n = seen.get(lab, 0)
+        seen[lab] = n + 1
+        uniq.append(lab if n == 0 else lab + (zw * n))
+    out["Сотрудник"] = uniq
+    cols = [c for c in ["Сотрудник", "KPI", "Категория", "Файл", "ФИО", "Пометка", "Должность", "Код", "Статус"] if c in out.columns]
+    return out[cols].reset_index(drop=True)
+
+
+# Диаграммы людей — всегда по штатке (не по имени из Excel)
+if not filled_staff.empty:
+    chart_df = _people_df_from_staff(filled_staff)
+elif has_uploads:
+    # штатки нет — запасной вариант по Excel
     chart_df = df.copy()
     if "Категория" not in chart_df.columns:
         chart_df["Категория"] = chart_df["KPI"].map(
             lambda x: kpi_category(float(x) if x is not None else None)
         )
 else:
-    # сплошной чёрный «не сдал» только по обязанным должностям (без директоров)
-    if not filled_staff.empty:
-        required = filled_staff[filled_staff["Статус"] != "➖ Не обязан"]
-        labels = [
-            f"{str(r.get('Должность') or '').strip()} · {str(r.get('ФИО') or '').strip()}".strip(" ·")
-            for _, r in required.iterrows()
-        ]
-    else:
-        labels = ["Должность 1"]
-    seats_n = len(labels) or 1
-    if not labels:
-        labels = ["Должность 1"]
-        seats_n = 1
     chart_df = pd.DataFrame(
         {
-            "Сотрудник": labels,
-            "KPI": [0.0] * seats_n,
-            "Категория": ["⚫ 0 / не сдал"] * seats_n,
+            "Сотрудник": ["Должность 1"],
+            "KPI": [0.0],
+            "Категория": ["⚫ 0 / не сдал"],
         }
     )
 
@@ -1641,6 +1752,29 @@ cat_colors = {
     "⚫ 0 / не сдал": "#1A1A1A",
 }
 
+# Вторая круговая: 4 диапазона % только у сдавших
+range_order = ["0–25%", "25–50%", "50–75%", "75–100%"]
+range_colors = {
+    "0–25%": "#E34935",
+    "25–50%": "#E06C00",
+    "50–75%": "#E2B203",
+    "75–100%": "#22A06B",
+}
+
+
+def _kpi_percent_range(kpi) -> str:
+    try:
+        v = float(kpi)
+    except (TypeError, ValueError):
+        v = 0.0
+    if v >= 75:
+        return "75–100%"
+    if v >= 50:
+        return "50–75%"
+    if v >= 25:
+        return "25–50%"
+    return "0–25%"
+
 # Отдельная круговая: сдали / не сдали (когда нет загрузок — сплошной чёрный 100%)
 submit_label = t(lang, "filter_bad")
 ok_label = t(lang, "filter_ok")
@@ -1668,11 +1802,45 @@ submit_colors = {ok_label: "#22A06B", submit_label: "#1A1A1A"}
 _pie_layout = {k: v for k, v in PLOTLY_LAYOUT.items() if k not in {"margin", "title"}}
 
 
+def _pie_with_side_labels(df, *, name_col: str, value_col: str) -> pd.DataFrame:
+    """Подписи с % — в легенде сбоку, не на кольце (мелкие сектора не теряются)."""
+    out = df.copy()
+    total = float(out[value_col].sum()) or 1.0
+    out["_display"] = out.apply(
+        lambda r: f"{r[name_col]} — {100.0 * float(r[value_col]) / total:.1f}%",
+        axis=1,
+    )
+    return out
+
+
+def _apply_pie_side_legend(fig, *, mobile: bool = False) -> None:
+    fig.update_traces(
+        textinfo="none",
+        textposition="none",
+        hovertemplate="<b>%{label}</b><br>%{percent}<br>%{value}<extra></extra>",
+        hoverlabel=dict(bgcolor="#ffffff", font_size=15, font_color="#1A2332"),
+    )
+    fig.update_layout(
+        showlegend=True,
+        legend=dict(
+            orientation="v",
+            yanchor="middle",
+            y=0.5,
+            x=1.02,
+            xanchor="left",
+            font=dict(size=11 if mobile else 12, color="#1A2332"),
+            bgcolor="rgba(0,0,0,0)",
+            borderwidth=0,
+        ),
+        margin=dict(l=20, r=150 if not mobile else 110, t=52, b=36),
+        hovermode="closest",
+    )
+
 def _map_drill_label(lab: str) -> str | None:
     lab = (lab or "").strip()
     if not lab:
         return None
-    if lab in {"ok", "bad"} or lab in cat_order:
+    if lab in {"ok", "bad"} or lab in cat_order or lab in range_order:
         return lab
     if lab == ok_label or lab in {
         "✅ Сдали",
@@ -1779,6 +1947,60 @@ Plotly.newPlot("{dom_id}", fig.data, layout, {{
     components.html(html, height=height + 16, scrolling=False)
 
 
+def _clickable_people_bar(fig, *, key: str, height: int) -> None:
+    """Горизонтальный барчарт: клик по полоске → отчёт в новой вкладке."""
+    fig.update_layout(height=height, autosize=True)
+    fig_json = fig.to_json()
+    dom_id = "".join(ch if ch.isalnum() else "_" for ch in key)
+    html = f"""
+<!DOCTYPE html>
+<html><head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<style>
+  html, body {{ margin:0; padding:0; background:transparent; overflow:hidden; }}
+  #{dom_id} {{ width: 100%; height: {height}px; cursor: pointer; }}
+</style>
+</head><body>
+<div id="{dom_id}"></div>
+<script>
+const fig = {fig_json};
+const layout = Object.assign({{}}, fig.layout || {{}}, {{
+  paper_bgcolor: "rgba(0,0,0,0)",
+  plot_bgcolor: "rgba(0,0,0,0)",
+  height: {height},
+  autosize: true,
+  margin: Object.assign({{l:6,r:56,t:48,b:20}}, (fig.layout && fig.layout.margin) || {{}})
+}});
+Plotly.newPlot("{dom_id}", fig.data, layout, {{
+  displayModeBar: false,
+  responsive: true,
+  staticPlot: false
+}}).then(function(gd) {{
+  window.addEventListener("resize", function() {{ Plotly.Plots.resize(gd); }});
+  gd.on("plotly_click", function(data) {{
+    if (!data || !data.points || !data.points.length) return;
+    const p = data.points[0];
+    let file = "";
+    let day = "";
+    if (Array.isArray(p.customdata)) {{
+      file = (p.customdata[0] || "").toString();
+      day = (p.customdata[1] || "").toString();
+    }}
+    if (!file || file === "(admin)") return;
+    const u = new URL(window.parent.location.href);
+    u.searchParams.set("report", file);
+    if (day) u.searchParams.set("report_day", day);
+    window.open(u.toString(), "_blank");
+  }});
+}});
+</script>
+</body></html>
+"""
+    components.html(html, height=height + 8, scrolling=False)
+
+
 # клик по диаграмме → фильтр штата + прокрутка к таблице штата
 _just_clicked = str(st.query_params.get("drill_go") or "") == "1"
 if "drill" in st.query_params:
@@ -1787,7 +2009,7 @@ if "drill" in st.query_params:
         st.session_state.staff_status_filter = mapped
         st.session_state.staff_kpi_cat = None
         st.session_state.chart_drill = mapped
-    elif mapped in cat_order:
+    elif mapped in range_order or mapped in cat_order:
         st.session_state.staff_status_filter = "all"
         st.session_state.staff_kpi_cat = mapped
         st.session_state.chart_drill = mapped
@@ -1803,9 +2025,10 @@ _pie_h = 260 if _mobile else 380
 _pie_cols = st.columns(1) if _mobile else st.columns(2)
 
 with _pie_cols[0]:
+    pie_df = _pie_with_side_labels(submit_stats, name_col="Статус", value_col="Количество")
     pie = px.pie(
-        submit_stats,
-        names="Статус",
+        pie_df,
+        names="_display",
         values="Количество",
         hole=0.58,
         title=t(lang, "pie_submit"),
@@ -1813,63 +2036,66 @@ with _pie_cols[0]:
         color_discrete_map=submit_colors,
         custom_data=["_code"],
     )
-    pie.update_traces(
-        textposition="outside",
-        textinfo="percent+label",
-        textfont_size=(11 if _mobile else 12),
-        textfont_color="#1A2332",
-        pull=[0.035] * max(len(submit_stats), 1),
-        hovertemplate="<b>%{label}</b><br>%{percent}<br>%{value}<extra></extra>",
-        hoverlabel=dict(bgcolor="#ffffff", font_size=15, font_color="#1A2332"),
-    )
-    pie.update_layout(
-        **_pie_layout,
-        showlegend=True,
-        legend=dict(orientation="h", y=-0.12),
-        margin=dict(l=16, r=16, t=48, b=48),
-        hovermode="closest",
-    )
+    if len(pie_df) > 1:
+        min_val = float(pie_df["Количество"].min())
+        pull_vals = [
+            0.08 if float(r["Количество"]) == min_val else 0.02 for _, r in pie_df.iterrows()
+        ]
+    else:
+        pull_vals = [0.02]
+    pie.update_traces(pull=pull_vals)
+    pie.update_layout(**_pie_layout, title=dict(text=t(lang, "pie_submit"), x=0.5, xanchor="center"))
+    _apply_pie_side_legend(pie, mobile=_mobile)
     _clickable_pie(pie, key="pie_submit_click", height=_pie_h)
 
 with (_pie_cols[0] if _mobile else _pie_cols[1]):
-    stats = chart_df["Категория"].value_counts().reindex(cat_order).dropna().reset_index()
-    stats.columns = ["Категория", "Количество"]
+    # Только сдавшие; распределение по 4 диапазонам %
+    pie2_src = chart_df.copy()
+    if "Статус" in pie2_src.columns:
+        pie2_src = pie2_src[~pie2_src["Статус"].isin(["❌ Не сдал", "➖ Не обязан"])]
+    elif "KPI" in pie2_src.columns:
+        pie2_src = pie2_src[pie2_src["KPI"] > 0]
+
+    if not pie2_src.empty and "KPI" in pie2_src.columns:
+        pie2_src = pie2_src.assign(_range=pie2_src["KPI"].map(_kpi_percent_range))
+        stats = (
+            pie2_src["_range"]
+            .value_counts()
+            .reindex(range_order, fill_value=0)
+            .reset_index()
+        )
+        stats.columns = ["Категория", "Количество"]
+        stats = stats[stats["Количество"] > 0]
+    else:
+        stats = pd.DataFrame(columns=["Категория", "Количество"])
+
     if stats.empty:
-        stats = pd.DataFrame({"Категория": ["⚫ 0 / не сдал"], "Количество": [len(chart_df) or 1]})
-    stats = stats.assign(_code=stats["Категория"])
-    pie2 = px.pie(
-        stats,
-        names="Категория",
-        values="Количество",
-        hole=0.58,
-        title=t(lang, "pie_cats"),
-        color="Категория",
-        color_discrete_map=cat_colors,
-        custom_data=["_code"],
-    )
-    pie2.update_traces(
-        textposition="outside",
-        textinfo="percent+label",
-        textfont_size=(11 if _mobile else 12),
-        textfont_color="#1A2332",
-        pull=[0.035] * max(len(stats), 1),
-        hovertemplate="<b>%{label}</b><br>%{percent}<br>%{value}<extra></extra>",
-        hoverlabel=dict(bgcolor="#ffffff", font_size=15, font_color="#1A2332"),
-    )
-    pie2.update_layout(
-        **_pie_layout,
-        showlegend=True,
-        legend=dict(orientation="h", y=-0.12),
-        margin=dict(l=16, r=16, t=48, b=56),
-        hovermode="closest",
-    )
-    _clickable_pie(pie2, key="pie_cats_click", height=_pie_h)
+        st.caption("Нет сдавших — распределение по % недоступно.")
+    else:
+        stats = stats.assign(_code=stats["Категория"])
+        stats_disp = _pie_with_side_labels(stats, name_col="Категория", value_col="Количество")
+        pie2 = px.pie(
+            stats_disp,
+            names="_display",
+            values="Количество",
+            hole=0.58,
+            title=t(lang, "pie_cats"),
+            color="Категория",
+            color_discrete_map=range_colors,
+            category_orders={"Категория": range_order},
+            custom_data=["_code"],
+        )
+        pie2.update_layout(**_pie_layout, title=dict(text=t(lang, "pie_cats"), x=0.5, xanchor="center"))
+        _apply_pie_side_legend(pie2, mobile=_mobile)
+        _clickable_pie(pie2, key="pie_cats_click", height=_pie_h)
 
 if not has_uploads:
     if _admin_unlocked:
         st.caption("Диаграммы: 100% «не сдал» — пока никто не загрузил Excel за этот день.")
 
-if has_uploads:
+# Барчарт / таблица — имена только из штатки (ФИО · юклатилган)
+show_people_chart = not chart_df.empty and "Сотрудник" in chart_df.columns
+if show_people_chart:
     sort_cols = st.columns([2.2, 1.2])
     with sort_cols[0]:
         st.markdown(
@@ -1889,8 +2115,10 @@ if has_uploads:
             key="people_sort_mode",
         )
 
-    ordered = df.copy()
-    ordered["_sort_name"] = ordered["Сотрудник"].astype(str).str.strip().str.casefold()
+    ordered = chart_df.copy()
+    ordered["_sort_name"] = (
+        ordered["Сотрудник"].astype(str).str.replace("\u200b", "", regex=False).str.strip().str.casefold()
+    )
 
     if sort_mode == "По алфавиту":
         ordered = ordered.sort_values(["_sort_name", "Сотрудник"], ascending=[True, True])
@@ -1903,6 +2131,23 @@ if has_uploads:
     names_top_to_bottom = ordered["Сотрудник"].tolist()
     names_bottom_to_top = list(reversed(names_top_to_bottom))
 
+    _report_day = ""
+    if view_mode == "day" and selected_day is not None:
+        _report_day = selected_day.isoformat()
+    if "Файл" not in ordered.columns:
+        ordered["Файл"] = ""
+    ordered["_report_file"] = ordered["Файл"].fillna("").astype(str)
+    ordered["_report_day"] = _report_day
+
+    def _name_cell(label: str, max_len: int) -> str:
+        clean = str(label or "").replace("\u200b", "").strip()
+        if len(clean) <= max_len:
+            return clean
+        return clean[: max_len - 1] + "…"
+
+    # Имена в фиксированной «ячейке» слева; диаграмма и % справа, без налезания
+    name_slot = 0.40 if _mobile else 0.30
+    name_max = 20 if _mobile else 28
     people = px.bar(
         ordered,
         x="KPI",
@@ -1911,47 +2156,88 @@ if has_uploads:
         text="KPI",
         color="Категория",
         color_discrete_map=cat_colors,
-        category_orders={"Категория": cat_order},
+        category_orders={"Категория": cat_order, "Сотрудник": names_bottom_to_top},
+        custom_data=["_report_file", "_report_day"],
     )
     people.update_traces(
         texttemplate="%{x:.1f}%",
         textposition="outside",
-        textfont=dict(color="#1A2332", size=12, family="Onest, sans-serif"),
+        textfont=dict(color="#1A2332", size=11 if _mobile else 12, family="Onest, sans-serif"),
         cliponaxis=False,
         insidetextanchor="middle",
+        hovertemplate="%{x:.1f}%<br><i>Открыть отчёт</i><extra></extra>",
     )
-    layout = {k: v for k, v in PLOTLY_LAYOUT.items() if k != "title"}
-    layout["margin"] = dict(l=12, r=80, t=16, b=24)
+    layout = {k: v for k, v in PLOTLY_LAYOUT.items() if k not in {"title", "margin"}}
     xmax = float(ordered["KPI"].max()) if not ordered.empty else 100.0
     people.update_layout(
         **layout,
         title=None,
         showlegend=True,
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
-        height=max(280 if _mobile else 360, (28 if _mobile else 32) * len(ordered) + (80 if _mobile else 100)),
-        bargap=0.25,
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            x=name_slot,
+            title_text="",
+        ),
+        margin=dict(l=6, r=44 if _mobile else 56, t=48, b=20),
+        height=max(280 if _mobile else 360, (26 if _mobile else 30) * len(ordered) + (80 if _mobile else 100)),
+        bargap=0.28,
+        # колонка имён | диаграмма | запас под %
+        xaxis=dict(domain=[name_slot, 0.88 if _mobile else 0.90]),
     )
     people.update_xaxes(
         showgrid=True,
         gridcolor="rgba(26,35,50,0.08)",
         title="",
-        range=[0, max(120.0, xmax * 1.18 + 8)],
+        range=[0, max(120.0, xmax * 1.22 + 8)],
         ticksuffix="%",
+        fixedrange=True,
     )
     people.update_yaxes(
         showgrid=False,
         title="",
+        showticklabels=False,
+        ticks="",
         categoryorder="array",
         categoryarray=names_bottom_to_top,
         autorange=True,
-        tickfont=dict(size=12, color="#1A2332"),
+        fixedrange=True,
     )
-    st.plotly_chart(people, use_container_width=True)
+    # фон «ячейки» имён
+    people.add_shape(
+        type="rect",
+        xref="paper",
+        yref="paper",
+        x0=0,
+        x1=name_slot - 0.012,
+        y0=0,
+        y1=1,
+        fillcolor="rgba(247,248,252,0.95)",
+        line=dict(width=0),
+        layer="below",
+    )
+    for lab in names_bottom_to_top:
+        people.add_annotation(
+            x=0.01,
+            xref="paper",
+            y=lab,
+            yref="y",
+            text=_name_cell(lab, name_max),
+            showarrow=False,
+            xanchor="left",
+            yanchor="middle",
+            align="left",
+            font=dict(size=11 if _mobile else 12, color="#1A2332", family="Onest, sans-serif"),
+        )
+    bar_h = max(280 if _mobile else 360, (26 if _mobile else 30) * len(ordered) + (80 if _mobile else 100))
+    _clickable_people_bar(people, key="people_bar_click", height=bar_h)
+    st.caption("Нажмите на полоску сотрудника — откроется его Excel-отчёт в новой вкладке.")
 
     st.divider()
 
     # =========================
-    # Filters + table
+    # Filters + table (штатка)
     # =========================
     st.markdown(
         f'<p class="akela-section-label">{t(lang, "table")}</p>',
@@ -1964,20 +2250,24 @@ if has_uploads:
     )
     search = st.text_input("Поиск сотрудника", placeholder="ФИО или должность…")
 
-    filtered_df = df.copy()
+    filtered_df = chart_df.copy()
     if category != "Все":
         filtered_df = filtered_df[filtered_df["Категория"] == category]
     if search:
-        filtered_df = filtered_df[
-            filtered_df["Сотрудник"].str.contains(search, case=False, na=False)
-        ]
+        q = search.strip()
+        mask = filtered_df["Сотрудник"].astype(str).str.contains(q, case=False, na=False)
+        if "Должность" in filtered_df.columns:
+            mask = mask | filtered_df["Должность"].astype(str).str.contains(q, case=False, na=False)
+        if "ФИО" in filtered_df.columns:
+            mask = mask | filtered_df["ФИО"].astype(str).str.contains(q, case=False, na=False)
+        filtered_df = filtered_df[mask]
 
     display_cols = [
         c
-        for c in ["Сотрудник", "KPI", "Категория", "Файл", "Обновлено"]
+        for c in ["Сотрудник", "KPI", "Категория", "Пометка", "Файл", "Статус"]
         if c in filtered_df.columns
     ]
-    table = filtered_df[display_cols]
+    table = filtered_df[display_cols] if display_cols else filtered_df
 
     if "KPI" in table.columns and not table.empty and table["KPI"].gt(0).any():
         try:
@@ -2062,12 +2352,17 @@ if not filled_staff.empty or not vacancies.empty or not roster.empty:
 
     kpi_cat = st.session_state.get("staff_kpi_cat")
     if kpi_cat:
-        if "Категория" not in staff_view.columns:
-            staff_view = staff_view.copy()
-            staff_view["Категория"] = staff_view["KPI"].map(
-                lambda x: kpi_category(float(x) if x is not None and str(x) != "" else None)
-            )
-        staff_view = staff_view[staff_view["Категория"] == kpi_cat]
+        if kpi_cat in range_order:
+            staff_view = staff_view[
+                staff_view["KPI"].map(_kpi_percent_range) == kpi_cat
+            ]
+        else:
+            if "Категория" not in staff_view.columns:
+                staff_view = staff_view.copy()
+                staff_view["Категория"] = staff_view["KPI"].map(
+                    lambda x: kpi_category(float(x) if x is not None and str(x) != "" else None)
+                )
+            staff_view = staff_view[staff_view["Категория"] == kpi_cat]
         st.caption(f"{kpi_cat}")
 
     if search_staff:
