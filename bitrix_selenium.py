@@ -670,6 +670,108 @@ def _harvest_links_by_opening_rows(driver) -> list[dict[str, str]]:
     return list(all_links.values())
 
 
+def _report_label(item: dict[str, Any]) -> str:
+    text = str(item.get("text") or "").strip()
+    if text:
+        return text.split("\n", 1)[0].strip()[:80]
+    uid = item.get("user_id")
+    rid = item.get("report")
+    return f"user={uid} report={rid}"
+
+
+def _pick_download_links(page_links: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Выбирает ссылки для скачивания: Normativ/get_attachment/.xlsx."""
+    if not page_links:
+        return []
+
+    normativ = [
+        L
+        for L in page_links
+        if "normativ" in (L.get("text") or "").lower()
+        or "normativ" in (L.get("href") or "").lower()
+    ]
+    if normativ:
+        return normativ
+
+    attach = [L for L in page_links if "get_attachment" in (L.get("href") or "").lower()]
+    if attach:
+        return attach
+
+    excel = [
+        L
+        for L in page_links
+        if ".xlsx" in (L.get("href") or "").lower() or ".xls" in (L.get("href") or "").lower()
+    ]
+    return excel
+
+
+def _download_href(
+    driver,
+    href: str,
+    download_dir: Path,
+    target_day: date,
+    *,
+    before: set[str],
+    downloaded: list[Path],
+) -> list[Path]:
+    """Скачивает один файл по ссылке; ошибки не пробрасывает."""
+    low = href.lower()
+    if any(ext in low for ext in (".png", ".jpg", ".jpeg", ".gif", ".pdf", ".doc")):
+        if ".xlsx" not in low and ".xls" not in low and "get_attachment" not in low:
+            return []
+
+    existing = {p.name for p in download_dir.iterdir() if p.is_file()}
+    try:
+        driver.get(href)
+    except Exception:
+        return []
+
+    new_files = _wait_downloads(download_dir, existing, timeout=45)
+    saved: list[Path] = []
+    for fpath in new_files:
+        qs = parse_qs(urlparse(href).query)
+        fid = (qs.get("fid") or ["?"])[0]
+        report_id = (qs.get("report_id") or ["?"])[0]
+        user_id = (qs.get("user_id") or ["?"])[0]
+        suffix = fpath.suffix.lower() or ".bin"
+        orig = fpath.name
+        if "normativ" in orig.lower():
+            new_name = orig
+        else:
+            new_name = _safe_name(
+                f"{target_day.isoformat()}_u{user_id}_r{report_id}_f{fid}_{fpath.stem}"
+            ) + suffix
+        target = download_dir / new_name
+        try:
+            if target.exists() and target != fpath:
+                target.unlink()
+            fpath.rename(target)
+            saved.append(target)
+        except Exception:
+            saved.append(fpath)
+        if target.name not in before:
+            downloaded.append(target if target.exists() else fpath)
+    return saved
+
+
+def _log_import_summary(
+    messages: list[str],
+    downloaded_reports: list[dict[str, Any]],
+    skipped_reports: list[dict[str, Any]],
+) -> None:
+    messages.append(
+        f"Итог: скачано отчётов {len(downloaded_reports)}, "
+        f"пропущено {len(skipped_reports)}."
+    )
+    for row in downloaded_reports:
+        files = ", ".join(row.get("files") or []) or "—"
+        messages.append(f"  ✓ {row.get('employee')}: {files}")
+    for row in skipped_reports:
+        messages.append(
+            f"  ⊘ {row.get('employee')}: {row.get('reason')} — {row.get('detail', '')}"
+        )
+
+
 def _wait_downloads(download_dir: Path, already: set[str], timeout: int = 60) -> list[Path]:
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -717,7 +819,18 @@ def _ensure_month(driver, target_day: date, messages: list[str]) -> None:
                 # тот же год, другой месяц
                 cur_idx = next((i for i, m in enumerate(months_ru) if m and m in body.split("Рабочие")[0][-80:]), 0)
                 btn = rights[0] if target_day.month > cur_idx else lefts[0]
-            elif str(target_day.year) > body:
+            elif str(target_day.year) not in body:
+                btn = rights[0] if rights else lefts[0]
+            elif str(target_day.year) > str(
+                next(
+                    (
+                        int(m.group(2))
+                        for m in [re.search(r"\b(20\d{2})\b", body)]
+                        if m
+                    ),
+                    target_day.year,
+                )
+            ):
                 btn = rights[0]
             else:
                 # сравним по тексту года в filter
@@ -848,18 +961,19 @@ def _slides_for_day(driver, target_day: date) -> list[dict[str, Any]]:
             if int(ci) == int(day_col):
                 selected.append(s)
                 continue
-        # fallback: если dayCol не определён — берём все (лучше все, чем ноль)
-    if not selected and slides and day_col < 0:
-        selected = slides
-    if not selected and slides:
-        # второй fallback: кликаем все цветные отчёты — но пометим warning
-        selected = slides
+
+    warning = ""
+    if day_col < 0 and slides:
+        warning = f"колонка дня {day_num} не найдена в заголовках {titles[:14]}"
+    elif not selected and slides:
+        warning = f"нет отчётов в колонке дня {day_num} (колонка={day_col})"
 
     return {
         "day_col": day_col,
         "titles": titles,
         "all_count": len(slides),
         "selected": selected,
+        "warning": warning,
     }
 
 
@@ -922,7 +1036,8 @@ def download_work_report_excels(target_day: date) -> dict[str, Any]:
 
     driver = _build_driver(download_dir)
     downloaded: list[Path] = []
-    links: list[dict[str, str]] = []
+    downloaded_reports: list[dict[str, Any]] = []
+    skipped_reports: list[dict[str, Any]] = []
     seen_href: set[str] = set()
 
     try:
@@ -947,6 +1062,8 @@ def download_work_report_excels(target_day: date) -> dict[str, Any]:
             n_slides = _wait_for_slides(driver, timeout=20 if page == 1 else 15)
             messages.append(f"Страница {page}: SLIDE={n_slides}.")
             info = _slides_for_day(driver, target_day)
+            if info.get("warning"):
+                messages.append(f"  ⚠ {info['warning']}")
             for s in info["selected"]:
                 rid = int(s["report"])
                 if rid in seen_reports:
@@ -1001,14 +1118,24 @@ def download_work_report_excels(target_day: date) -> dict[str, Any]:
         for idx, item in enumerate(selected, start=1):
             uid = int(item["user_id"])
             rid = int(item["report"])
-            messages.append(f"[{idx}/{len(selected)}] Открываю report={rid} user={uid}…")
+            label = _report_label(item)
+            messages.append(f"[{idx}/{len(selected)}] {label} (report={rid})…")
+
             try:
                 _open_report_slider(driver, uid, rid)
             except Exception as exc:
-                messages.append(f"  не открылся: {exc}")
+                skipped_reports.append(
+                    {
+                        "user_id": uid,
+                        "report_id": rid,
+                        "employee": label,
+                        "reason": "open_failed",
+                        "detail": str(exc),
+                    }
+                )
+                messages.append(f"  ⊘ пропуск: не открылся — {exc}")
                 continue
 
-            # дождаться попапа отчёта
             ready = False
             for _ in range(20):
                 ready = driver.execute_script(
@@ -1021,97 +1148,118 @@ def download_work_report_excels(target_day: date) -> dict[str, Any]:
                     break
                 time.sleep(0.4)
             if not ready:
-                messages.append("  попап не появился.")
-                continue
-
-            _scroll_down_for_files(driver, steps=10)
-            time.sleep(1.2)
-
-            page_links = _collect_attachment_links(driver)
-            # также любые a.upload-file-name
-            from selenium.webdriver.common.by import By
-
-            for a in driver.find_elements(By.CSS_SELECTOR, "a.upload-file-name, a[href*='get_attachment']"):
-                href = a.get_attribute("href") or ""
-                text = (a.text or "").strip()
-                if href and href not in seen_href:
-                    page_links.append({"href": href, "text": text})
-
-            normativ_links = [
-                L
-                for L in page_links
-                if "normativ" in (L.get("text") or "").lower()
-                or "normativ" in (L.get("href") or "").lower()
-                or "get_attachment" in (L.get("href") or "").lower()
-            ]
-
-            if not normativ_links and not page_links:
-                messages.append("  файлов во вложении нет (только «Загрузить файл»).")
-            else:
-                messages.append(
-                    f"  ссылок: {len(page_links)}, из них на скачивание: {len(normativ_links) or len(page_links)}."
+                skipped_reports.append(
+                    {
+                        "user_id": uid,
+                        "report_id": rid,
+                        "employee": label,
+                        "reason": "popup_missing",
+                        "detail": "попап отчёта не появился",
+                    }
                 )
-
-            file_clicks = _click_file_icons(driver)
-            if file_clicks:
-                messages.append(f"  кликов по файлам: {file_clicks}")
-                time.sleep(1.5)
-
-            for link in (normativ_links or page_links):
-                href = link["href"]
-                if href in seen_href:
-                    continue
-                seen_href.add(href)
-                links.append(link)
-
-            for p in download_dir.iterdir():
-                if p.is_file() and p.name not in before and p.name not in {x.name for x in downloaded}:
-                    if not p.name.endswith(".crdownload"):
-                        downloaded.append(p)
-
-            _close_report_slider(driver)
-            time.sleep(0.6)
-
-        messages.append(f"Собрано ссылок на вложения: {len(links)}.")
-
-        for idx, item in enumerate(links, start=1):
-            href = item["href"]
-            low = href.lower()
-            if any(ext in low for ext in (".png", ".jpg", ".jpeg", ".gif", ".pdf", ".doc")):
-                if ".xlsx" not in low and ".xls" not in low and "get_attachment" not in low:
-                    continue
-
-            existing = {p.name for p in download_dir.iterdir() if p.is_file()}
-            try:
-                driver.get(href)
-            except Exception as exc:
-                messages.append(f"Скачивание #{idx} fail: {exc}")
+                messages.append("  ⊘ пропуск: попап не появился.")
+                _close_report_slider(driver)
                 continue
 
-            new_files = _wait_downloads(download_dir, existing, timeout=45)
-            for fpath in new_files:
-                qs = parse_qs(urlparse(href).query)
-                fid = (qs.get("fid") or ["?"])[0]
-                report_id = (qs.get("report_id") or ["?"])[0]
-                user_id = (qs.get("user_id") or ["?"])[0]
-                suffix = fpath.suffix.lower() or ".bin"
-                # сохранить оригинальное имя если Normativ
-                orig = fpath.name
-                if "normativ" in orig.lower():
-                    new_name = orig
+            try:
+                _scroll_down_for_files(driver, steps=10)
+                time.sleep(1.2)
+
+                page_links = _collect_attachment_links(driver)
+                from selenium.webdriver.common.by import By
+
+                for a in driver.find_elements(
+                    By.CSS_SELECTOR, "a.upload-file-name, a[href*='get_attachment']"
+                ):
+                    href = a.get_attribute("href") or ""
+                    text = (a.text or "").strip()
+                    if href:
+                        page_links.append({"href": href, "text": text})
+
+                pick_links = _pick_download_links(page_links)
+                if not pick_links:
+                    skipped_reports.append(
+                        {
+                            "user_id": uid,
+                            "report_id": rid,
+                            "employee": label,
+                            "reason": "no_download_link",
+                            "detail": "нет ссылки/кнопки скачивания",
+                        }
+                    )
+                    messages.append("  ⊘ пропуск: нет ссылки на скачивание.")
+                    _close_report_slider(driver)
+                    time.sleep(0.4)
+                    continue
+
+                messages.append(f"  ссылок на скачивание: {len(pick_links)}.")
+                file_clicks = _click_file_icons(driver)
+                if file_clicks:
+                    messages.append(f"  кликов по файлам: {file_clicks}")
+                    time.sleep(1.5)
+                    for p in download_dir.iterdir():
+                        if (
+                            p.is_file()
+                            and p.name not in before
+                            and p.name not in {x.name for x in downloaded}
+                            and not p.name.endswith(".crdownload")
+                        ):
+                            downloaded.append(p)
+
+                report_files: list[str] = []
+                for link in pick_links:
+                    href = link.get("href") or ""
+                    if not href or href in seen_href:
+                        continue
+                    seen_href.add(href)
+                    saved = _download_href(
+                        driver,
+                        href,
+                        download_dir,
+                        target_day,
+                        before=before,
+                        downloaded=downloaded,
+                    )
+                    for p in saved:
+                        report_files.append(p.name)
+
+                if not report_files:
+                    skipped_reports.append(
+                        {
+                            "user_id": uid,
+                            "report_id": rid,
+                            "employee": label,
+                            "reason": "download_failed",
+                            "detail": f"ссылки есть ({len(pick_links)}), файл не скачался",
+                        }
+                    )
+                    messages.append("  ⊘ пропуск: ссылка есть, скачивание не удалось.")
                 else:
-                    new_name = _safe_name(
-                        f"{target_day.isoformat()}_u{user_id}_r{report_id}_f{fid}_{fpath.stem}"
-                    ) + suffix
-                target = download_dir / new_name
-                try:
-                    if target.exists() and target != fpath:
-                        target.unlink()
-                    fpath.rename(target)
-                    downloaded.append(target)
-                except Exception:
-                    downloaded.append(fpath)
-            time.sleep(0.5)
+                    downloaded_reports.append(
+                        {
+                            "user_id": uid,
+                            "report_id": rid,
+                            "employee": label,
+                            "files": report_files,
+                        }
+                    )
+                    messages.append(f"  ✓ скачано: {', '.join(report_files)}")
+            except Exception as exc:
+                skipped_reports.append(
+                    {
+                        "user_id": uid,
+                        "report_id": rid,
+                        "employee": label,
+                        "reason": "error",
+                        "detail": str(exc),
+                    }
+                )
+                messages.append(f"  ⊘ ошибка при обработке: {exc}")
+            finally:
+                _close_report_slider(driver)
+                time.sleep(0.5)
+
+        _log_import_summary(messages, downloaded_reports, skipped_reports)
 
         excel_files = sorted(
             {
@@ -1137,7 +1285,13 @@ def download_work_report_excels(target_day: date) -> dict[str, Any]:
         return {
             "dir": download_dir,
             "files": excel_files,
-            "links_found": len(links),
+            "downloaded_reports": downloaded_reports,
+            "skipped_reports": skipped_reports,
+            "summary": {
+                "total": len(selected),
+                "downloaded": len(downloaded_reports),
+                "skipped": len(skipped_reports),
+            },
             "messages": messages,
         }
     finally:

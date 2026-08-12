@@ -53,12 +53,25 @@ def fetch_reports_to_disk(target_day: date) -> dict[str, Any]:
             file_blobs[path.name] = path.read_bytes()
 
     if not file_blobs:
+        summary = result.get("summary") or {}
+        skipped = result.get("skipped_reports") or []
         messages.append("Из «Отчётов» не скачано ни одного Excel.")
+        if summary:
+            messages.append(
+                f"Сводка: всего {summary.get('total', 0)}, "
+                f"скачано {summary.get('downloaded', 0)}, "
+                f"пропущено {summary.get('skipped', 0)}."
+            )
+        if skipped:
+            messages.append(f"Пропущено отчётов: {len(skipped)} (см. лог выше).")
         return {
             "ok": False,
             "file_blobs": {},
             "dir": result.get("dir"),
             "messages": messages,
+            "summary": summary,
+            "skipped_reports": skipped,
+            "downloaded_reports": result.get("downloaded_reports") or [],
         }
 
     messages.append(f"Из «Отчётов»: {len(file_blobs)} файл(ов).")
@@ -81,6 +94,9 @@ def fetch_reports_to_disk(target_day: date) -> dict[str, Any]:
         "file_blobs": file_blobs,
         "dir": result.get("dir"),
         "messages": messages,
+        "summary": result.get("summary") or {},
+        "downloaded_reports": result.get("downloaded_reports") or [],
+        "skipped_reports": result.get("skipped_reports") or [],
     }
 
 

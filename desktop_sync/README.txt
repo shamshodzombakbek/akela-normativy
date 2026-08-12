@@ -25,4 +25,9 @@ Akela Normativ Sync — Windows
 Окно: каждые 10 мин, 16:00–18:30 (Ташкент).
 Кнопка «Синхронизировать сейчас» — сразу, в любое время.
 
+Если у отчёта нет файла — программа пропускает его и продолжает.
+В журнале видно: что скачано (✓), что пропущено (⊘) и почему.
+
 Лог: %APPDATA%\AkelaNormativSync\sync.log
+
+Сборка exe: GitHub → Actions → «Build Windows desktop app» → Artifacts.

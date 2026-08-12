@@ -27,7 +27,7 @@ from desktop_sync.config_store import (  # noqa: E402
 from desktop_sync.worker import run_sync_once  # noqa: E402
 
 APP_TITLE = "Akela · Синхронизация нормативов"
-APP_VERSION = "1.0"
+APP_VERSION = "1.1"
 
 
 class SyncApp(tk.Tk):
