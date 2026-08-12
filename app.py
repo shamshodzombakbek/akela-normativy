@@ -1135,17 +1135,19 @@ if _admin_unlocked:
         f'<p class="akela-section-label">{t(lang, "upload")}</p>',
         unsafe_allow_html=True,
     )
+    upload_kind_labels = {
+        "day": t(lang, "type_day"),
+        "week": t(lang, "type_week"),
+        "month": t(lang, "type_month"),
+    }
     upload_kind = st.radio(
         t(lang, "report_type"),
         options=["day", "week", "month"],
-        format_func=lambda k: {
-            "day": t(lang, "type_day"),
-            "week": t(lang, "type_week"),
-            "month": t(lang, "type_month"),
-        }[k],
+        format_func=lambda k: upload_kind_labels[k],
         horizontal=True,
         key="upload_kind",
     )
+    upload_kind_label = upload_kind_labels[upload_kind]
     if upload_kind == "day":
         target_ref = selected_day or current_slot
         st.caption(
