@@ -89,7 +89,10 @@ def _download_file_bytes(file_meta: dict) -> bytes:
         url = fresh.get("DOWNLOAD_URL")
     if not url:
         raise RuntimeError("Нет DOWNLOAD_URL у shared_kpi.json")
-    response = requests.get(url, timeout=60)
+    # Не используем окруженческие прокси, чтобы локальный запуск не ломался.
+    s = requests.Session()
+    s.trust_env = False
+    response = s.get(url, timeout=60)
     response.raise_for_status()
     return response.content
 

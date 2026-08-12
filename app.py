@@ -298,6 +298,15 @@ a.cal-cell:hover { filter: brightness(0.96); color: inherit; }
   color: transparent;
   pointer-events: none;
 }
+.cal-head-label {
+  margin: 0;
+  padding: 0;
+  text-align: center;
+  font-size: 11px;
+  color: #7A8B9C;
+  font-weight: 600;
+  line-height: 1.2;
+}
 /* календарь: только колонка шапки; сильно ужат под «красный квадрат» */
 div[data-testid="column"]:has(.akela-cal-root) [data-testid="stVerticalBlock"] {
   gap: 0.12rem !important;
@@ -981,13 +990,19 @@ def _render_calendar_panel() -> None:
             _clear_cal_qp()
             st.rerun()
 
-    st.markdown(
-        '<div class="cal-head-row">'
-        f'<span>{t(lang, "week_col")[:1]}</span>'
-        + "".join(f"<span>{lab[:2]}</span>" for lab in wd)
-        + "</div>",
-        unsafe_allow_html=True,
-    )
+    # Заголовок дней — те же st.columns, что и строки (HTML-сетка ломается в Streamlit).
+    head = st.columns([0.75] + [1] * 7)
+    with head[0]:
+        st.markdown(
+            f'<p class="cal-head-label">{t(lang, "week_col")[:1]}</p>',
+            unsafe_allow_html=True,
+        )
+    for hi, lab in enumerate(wd):
+        with head[hi + 1]:
+            st.markdown(
+                f'<p class="cal-head-label">{lab}</p>',
+                unsafe_allow_html=True,
+            )
 
     for wid, ws, we in weeks_in_month(cal_y, cal_m):
         row = st.columns([0.75] + [1] * 7)
@@ -1120,7 +1135,9 @@ if _mobile:
         st.rerun()
 
     if st.session_state.show_calendar:
-        _render_calendar_panel()
+        _, cal_mid, _ = st.columns([0.04, 0.92, 0.04])
+        with cal_mid:
+            _render_calendar_panel()
 else:
     top_logo, top_cal, top_lang = st.columns([1.0, 1.55, 0.9])
     with top_logo:

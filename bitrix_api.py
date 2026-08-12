@@ -14,6 +14,15 @@ from utils import kpi_category
 
 _ENV_PATH = os.path.join(os.path.dirname(__file__), ".env")
 
+def _requests_session() -> requests.Session:
+    """
+    Нужен, чтобы запросы к Bitrix не шли через окруженческие прокси
+    (в локальной среде там часто стоит прокси, который ломает Bitrix запросы).
+    """
+    s = requests.Session()
+    s.trust_env = False
+    return s
+
 
 def _webhook_url() -> str:
     load_dotenv(_ENV_PATH, override=True)
@@ -39,7 +48,9 @@ def bitrix_call(method: str, params: dict | None = None) -> Any:
 
 def bitrix_call_full(method: str, params: dict | None = None) -> dict:
     """Вызов REST-метода с полным ответом (включая next для пагинации)."""
-    response = requests.post(
+    # ВАЖНО: не используем HTTP(S)_PROXY из окружения.
+    # Иначе локальный запуск может падать с ProxyError/403, а прод работает.
+    response = _requests_session().post(
         f"{_webhook_url()}{method}",
         json=params or {},
         timeout=60,
