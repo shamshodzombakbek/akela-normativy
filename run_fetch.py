@@ -58,6 +58,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Только прочитать Диск, без публикации на сайт.",
     )
     parser.add_argument(
+        "--from-reports",
+        action="store_true",
+        help="Сначала скачать из «Отчётов» (Selenium) и положить на Диск.",
+    )
+    parser.add_argument(
         "--no-replace",
         action="store_true",
         help="Не заменять существующие записи дня (добавить к имеющимся).",
@@ -80,6 +85,7 @@ def main(argv: list[str] | None = None) -> int:
 
     result = fetch_normativs(
         window_day,
+        source="auto" if args.from_reports else "disk",
         publish=not args.dry_run,
         replace=not args.no_replace,
     )

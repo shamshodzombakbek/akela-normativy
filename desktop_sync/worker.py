@@ -41,8 +41,10 @@ def run_sync_once(*, force: bool = False, on_log: LogFn | None = None) -> tuple[
 
         from bitrix_fetch import fetch_normativs
 
-        log(f"Старт синхронизации · слот {window_day.isoformat()}")
-        result = fetch_normativs(window_day, publish=True, replace=True)
+        log(f"Старт: «Отчёты» → Диск → сайт · слот {window_day.isoformat()}")
+        result = fetch_normativs(
+            window_day, source="auto", publish=True, replace=True
+        )
         for m in result.get("messages") or []:
             log(str(m))
 
@@ -51,7 +53,7 @@ def run_sync_once(*, force: bool = False, on_log: LogFn | None = None) -> tuple[
             log(msg)
             return True, msg
 
-        msg = "На Диске нет Excel за этот день"
+        msg = "Не удалось скачать из «Отчётов» и на Диске нет файлов за этот день"
         log(msg)
         return False, msg
     except Exception as exc:

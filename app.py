@@ -1226,15 +1226,18 @@ if _admin_unlocked:
     with st.expander("Скачать программу для Windows (.exe)"):
         st.markdown(
             """
-**AkelaNormativSync** — один `.exe`, синхронизирует дашборд с Диском Битрикс24.
+**AkelaNormativSync** — программа на Windows:
 
-1. Скачайте **AkelaNormativSync-Windows.zip** из [Actions → Build Windows desktop app](https://github.com/shamshodzombakbek/akela-normativy/actions/workflows/build-desktop.yml)  
-   (последний успешный запуск → Artifacts).
-2. Распакуйте zip.
-3. Запустите `AkelaNormativSync.exe` → введите webhook, Google folder ID, JSON-ключ → **Сохранить**.
-4. Запустите `install_windows_autostart.bat` — программа будет **сама работать в фоне** при входе в Windows.
+1. Качает Excel из **«Отчёты о работе»** в Битрикс24.
+2. Кладёт их на **Общий диск** → `Akela Normativy / дата /`.
+3. Сайт берёт файлы с Диска и показывает на дашборде.
 
-Настройки: `%APPDATA%\\AkelaNormativSync\\` · журнал: `sync.log`
+Скачайте **AkelaNormativSync-Windows.zip** из [Actions → Build Windows desktop app](https://github.com/shamshodzombakbek/akela-normativy/actions/workflows/build-desktop.yml) (последний успешный запуск → Artifacts).
+
+На ПК: Google Chrome + `AkelaNormativSync.exe` → логин/пароль Битрикс, webhook, Google-ключ → **Сохранить**.  
+`install_windows_autostart.bat` — автозапуск в фоне.
+
+Настройки: `%APPDATA%\\AkelaNormativSync\\`
             """
         )
 

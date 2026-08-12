@@ -34,8 +34,8 @@ class SyncApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title(APP_TITLE)
-        self.geometry("620x520")
-        self.minsize(520, 420)
+        self.geometry("680x640")
+        self.minsize(560, 500)
 
         self._cfg = load_config()
         self._auto_running = False
@@ -64,24 +64,32 @@ class SyncApp(tk.Tk):
         )
         ttk.Label(
             frm,
-            text="Читает Excel с Диска Битрикс24 и обновляет тот же дашборд, что на сайте.",
-            wraplength=560,
+            text="Качает Excel из «Отчёты о работе» в Битрикс24, кладёт на Диск "
+            "(папка Akela Normativy / дата), сайт берёт файлы оттуда.",
+            wraplength=620,
         ).pack(anchor=tk.W, padx=10)
 
         settings = ttk.LabelFrame(frm, text="Настройки (один раз)")
         settings.pack(fill=tk.X, **pad)
 
         self._webhook = tk.StringVar()
+        self._login = tk.StringVar()
+        self._password = tk.StringVar()
+        self._portal = tk.StringVar(value="https://akelagroup.bitrix24.ru")
         self._folder_id = tk.StringVar()
         self._key_path = tk.StringVar()
         self._normativ_folder = tk.StringVar(value="Akela Normativy")
         self._interval = tk.IntVar(value=10)
         self._auto_var = tk.BooleanVar(value=True)
+        self._show_browser = tk.BooleanVar(value=False)
 
         self._row(settings, "BITRIX webhook URL", self._webhook)
+        self._row(settings, "Логин Битрикс24", self._login)
+        self._row_password(settings)
+        self._row(settings, "Портал", self._portal)
         self._row(settings, "Google Drive folder ID", self._folder_id)
         self._row_key(settings)
-        self._row(settings, "Папка на Диске Битрикс", self._normativ_folder)
+        self._row(settings, "Папка на Диске", self._normativ_folder)
 
         row_iv = ttk.Frame(settings)
         row_iv.pack(fill=tk.X, padx=8, pady=2)
@@ -91,6 +99,9 @@ class SyncApp(tk.Tk):
         )
         ttk.Checkbutton(row_iv, text="Автосинхронизация при запуске", variable=self._auto_var).pack(
             side=tk.LEFT, padx=12
+        )
+        ttk.Checkbutton(row_iv, text="Показать браузер", variable=self._show_browser).pack(
+            side=tk.LEFT, padx=8
         )
 
         btn_row = ttk.Frame(settings)
@@ -124,6 +135,14 @@ class SyncApp(tk.Tk):
         ttk.Label(row, text=label, width=22).pack(side=tk.LEFT)
         ttk.Entry(row, textvariable=var).pack(side=tk.LEFT, fill=tk.X, expand=True)
 
+    def _row_password(self, parent: ttk.LabelFrame) -> None:
+        row = ttk.Frame(parent)
+        row.pack(fill=tk.X, padx=8, pady=2)
+        ttk.Label(row, text="Пароль Битрикс24", width=22).pack(side=tk.LEFT)
+        ttk.Entry(row, textvariable=self._password, show="•").pack(
+            side=tk.LEFT, fill=tk.X, expand=True
+        )
+
     def _row_key(self, parent: ttk.LabelFrame) -> None:
         row = ttk.Frame(parent)
         row.pack(fill=tk.X, padx=8, pady=2)
@@ -142,25 +161,33 @@ class SyncApp(tk.Tk):
     def _load_fields(self) -> None:
         c = self._cfg
         self._webhook.set(c.bitrix_webhook_url)
+        self._login.set(c.bitrix_login)
+        self._password.set(c.bitrix_password)
+        self._portal.set(c.bitrix_portal or "https://akelagroup.bitrix24.ru")
         self._folder_id.set(c.google_drive_folder_id)
         self._key_path.set(c.google_key_path)
         self._normativ_folder.set(c.bitrix_normativ_folder or "Akela Normativy")
         self._interval.set(max(5, min(60, int(c.interval_minutes or 10))))
         self._auto_var.set(bool(c.auto_sync))
+        self._show_browser.set(bool(c.show_browser))
 
     def _save(self) -> None:
         self._cfg = AppConfig(
             bitrix_webhook_url=self._webhook.get().strip(),
+            bitrix_login=self._login.get().strip(),
+            bitrix_password=self._password.get().strip(),
+            bitrix_portal=self._portal.get().strip() or "https://akelagroup.bitrix24.ru",
             google_drive_folder_id=self._folder_id.get().strip(),
             google_key_path=self._key_path.get().strip(),
             bitrix_normativ_folder=self._normativ_folder.get().strip() or "Akela Normativy",
             auto_sync=bool(self._auto_var.get()),
             interval_minutes=int(self._interval.get() or 10),
+            show_browser=bool(self._show_browser.get()),
         )
         if not is_configured(self._cfg):
             messagebox.showwarning(
                 "Не хватает данных",
-                "Укажите webhook, ID папки Google и выберите JSON-ключ.",
+                "Укажите webhook, логин/пароль Битрикс, ID папки Google и JSON-ключ.",
             )
             return
         save_config(self._cfg)

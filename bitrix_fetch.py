@@ -1,51 +1,139 @@
 """
-Загрузка Normativ с Диска Битрикс24 (REST) → publish.
-
-Без Selenium и без привязки к конкретному компьютеру.
-Cron: fetch_scheduler.py или GitHub Actions (.github/workflows/fetch-normativy.yml).
+Загрузка Normativ:
+  «Отчёты о работе» (Selenium, только десктоп) → папка на Диске → дашборд.
+  Сайт / GitHub Actions читают только Диск (без браузера).
 """
 
 from __future__ import annotations
 
+import os
 from datetime import date
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
-from bitrix_disk import fetch_normativs_from_disk
+from bitrix_disk import fetch_normativs_from_disk, upload_normativs_to_disk
 from schedule import active_window_day, bitrix_target_day
 from shared_store import publish_day_snapshot
 from utils import load_excel_reports_from_blobs, load_excel_reports_from_dir
 
+Source = Literal["auto", "disk", "reports"]
+
 _ROOT = Path(__file__).resolve().parent
+
+
+def selenium_available() -> tuple[bool, str]:
+    login = (os.getenv("BITRIX_LOGIN") or "").strip()
+    password = (os.getenv("BITRIX_PASSWORD") or "").strip()
+    if not login or not password:
+        return False, "Нужны логин и пароль Битрикс24."
+    try:
+        import selenium  # noqa: F401
+        import webdriver_manager  # noqa: F401
+    except ImportError:
+        return False, "Не установлены selenium / webdriver-manager."
+    return True, ""
+
+
+def fetch_reports_to_disk(target_day: date) -> dict[str, Any]:
+    """
+    Открывает «Отчёты о работе», качает Normativ_*.xlsx,
+    кладёт в Общий диск / Akela Normativy / YYYY-MM-DD /.
+    """
+    from bitrix_selenium import download_work_report_excels
+
+    messages: list[str] = []
+    result = download_work_report_excels(target_day)
+    for msg in result.get("messages") or []:
+        messages.append(str(msg))
+
+    file_blobs: dict[str, bytes] = {}
+    for p in result.get("files") or []:
+        path = Path(p)
+        if path.is_file():
+            file_blobs[path.name] = path.read_bytes()
+
+    if not file_blobs:
+        messages.append("Из «Отчётов» не скачано ни одного Excel.")
+        return {
+            "ok": False,
+            "file_blobs": {},
+            "dir": result.get("dir"),
+            "messages": messages,
+        }
+
+    messages.append(f"Из «Отчётов»: {len(file_blobs)} файл(ов).")
+    try:
+        messages.extend(upload_normativs_to_disk(target_day, file_blobs))
+        messages.append(
+            f"Файлы записаны на Диск: Akela Normativy / {target_day.isoformat()} /"
+        )
+    except Exception as exc:  # noqa: BLE001
+        messages.append(f"Не удалось положить на Диск: {exc}")
+        return {
+            "ok": False,
+            "file_blobs": file_blobs,
+            "dir": result.get("dir"),
+            "messages": messages,
+        }
+
+    return {
+        "ok": True,
+        "file_blobs": file_blobs,
+        "dir": result.get("dir"),
+        "messages": messages,
+    }
 
 
 def fetch_normativs(
     window_day: date | None = None,
     *,
+    source: Source = "disk",
     publish: bool = True,
     replace: bool = True,
 ) -> dict[str, Any]:
     """
-    window_day — слот дашборда.
-    На Диске ищем подпапку bitrix_target_day(window_day) (отчёты за предыдущий рабочий день).
+    source:
+      disk — только REST с Диска (сайт / GitHub Actions);
+      reports — Selenium из «Отчётов» + копия на Диск (десктоп);
+      auto — сначала «Отчёты», если пусто — Диск.
     """
     window_day = window_day or active_window_day()
     target = bitrix_target_day(window_day)
     messages: list[str] = [
-        f"Слот {window_day.isoformat()} · файлы на Диске за {target.isoformat()}"
+        f"Слот {window_day.isoformat()} · день в Битрикс {target.isoformat()}"
     ]
 
-    disk = fetch_normativs_from_disk(target)
-    messages.extend(disk.get("messages") or [])
-    file_blobs: dict[str, bytes] = dict(disk.get("file_blobs") or {})
-    local_dir = disk.get("dir")
+    file_blobs: dict[str, bytes] = {}
+    source_used: str | None = None
+    local_dir: Path | None = None
+
+    if source in ("auto", "reports"):
+        ok_sel, why = selenium_available()
+        if not ok_sel:
+            messages.append(why)
+        else:
+            messages.append("Качаю из раздела «Отчёты о работе»…")
+            rep = fetch_reports_to_disk(target)
+            messages.extend(rep.get("messages") or [])
+            if rep.get("ok") and rep.get("file_blobs"):
+                file_blobs = dict(rep["file_blobs"])
+                source_used = "reports"
+                local_dir = Path(rep["dir"]) if rep.get("dir") else None
+
+    if not file_blobs and source in ("auto", "disk"):
+        disk = fetch_normativs_from_disk(target)
+        messages.extend(disk.get("messages") or [])
+        if disk.get("ok") and disk.get("file_blobs"):
+            file_blobs = dict(disk["file_blobs"])
+            source_used = "disk"
+            local_dir = disk.get("dir")
 
     if not file_blobs:
         return {
             "ok": False,
             "window_day": window_day,
             "target_day": target,
-            "source": "disk",
+            "source": source_used,
             "messages": messages,
             "count": 0,
         }
@@ -61,7 +149,7 @@ def fetch_normativs(
             "ok": False,
             "window_day": window_day,
             "target_day": target,
-            "source": "disk",
+            "source": source_used,
             "messages": messages,
             "count": 0,
             "file_blobs": file_blobs,
@@ -72,9 +160,12 @@ def fetch_normativs(
         messages.append(f"Пропущено файлов без %: {len(skipped)}")
 
     day_store = _ROOT / "downloads" / "reports" / window_day.isoformat()
-    day_store.mkdir(parents=True, exist_ok=True)
-    for name, blob in file_blobs.items():
-        (day_store / name).write_bytes(blob)
+    try:
+        day_store.mkdir(parents=True, exist_ok=True)
+        for name, blob in file_blobs.items():
+            (day_store / name).write_bytes(blob)
+    except Exception:
+        pass
 
     meta: dict[str, Any] = {}
     if publish:
@@ -87,7 +178,8 @@ def fetch_normativs(
             file_blobs=file_blobs,
         )
         messages.append(
-            f"Опубликовано: {meta.get('count', len(df_pub))} записей с Диска Битрикс24."
+            f"Опубликовано на сайт: {meta.get('count', len(df_pub))} записей "
+            f"(источник: {source_used})."
         )
     else:
         messages.append(f"Распознано записей: {len(incoming)} (без публикации).")
@@ -96,7 +188,7 @@ def fetch_normativs(
         "ok": True,
         "window_day": window_day,
         "target_day": target,
-        "source": "disk",
+        "source": source_used or source,
         "messages": messages,
         "count": len(incoming),
         "meta": meta,

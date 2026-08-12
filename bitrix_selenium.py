@@ -1,10 +1,8 @@
 """
-УСТАРЕЛО: не используется в продакшене. Normativ берутся с Диска Битрикс24 (bitrix_disk.py).
-
 Скачивание Excel-вложений из «Отчёты о работе» через Selenium.
 
 Файлы лежат в служебном хранилище timeman (не Диск) —
-REST их не отдаёт, поэтому эмулируем действия в браузере.
+REST их не отдаёт. Десктоп-программа качает отсюда и кладёт на Диск.
 """
 
 from __future__ import annotations
@@ -29,7 +27,13 @@ WORK_REPORT_PATH = "/timeman/work_report.php"
 
 
 def _load_env() -> None:
-    load_dotenv(_ENV_PATH, override=True)
+    load_dotenv(_ENV_PATH, override=False)
+
+
+def _cookie_file() -> Path:
+    _load_env()
+    custom = (os.getenv("BITRIX_COOKIE_PATH") or "").strip()
+    return Path(custom) if custom else _COOKIE_PATH
 
 
 def _portal() -> str:
@@ -97,14 +101,17 @@ def _build_driver(download_dir: Path):
 
 def _save_cookies(driver) -> None:
     cookies = driver.get_cookies()
-    _COOKIE_PATH.write_text(json.dumps(cookies, ensure_ascii=False, indent=2), encoding="utf-8")
+    path = _cookie_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(cookies, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def _load_cookies(driver) -> bool:
-    if not _COOKIE_PATH.exists():
+    path = _cookie_file()
+    if not path.exists():
         return False
     try:
-        cookies = json.loads(_COOKIE_PATH.read_text(encoding="utf-8"))
+        cookies = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return False
 
