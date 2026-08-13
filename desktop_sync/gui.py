@@ -27,7 +27,7 @@ from desktop_sync.config_store import (  # noqa: E402
 from desktop_sync.worker import run_sync_once  # noqa: E402
 
 APP_TITLE = "Akela · Синхронизация нормативов"
-APP_VERSION = "1.3"
+APP_VERSION = "1.4"
 
 # Windows keycodes (не зависят от RU/EN раскладки)
 _KC_A, _KC_C, _KC_V, _KC_X = 65, 67, 86, 88

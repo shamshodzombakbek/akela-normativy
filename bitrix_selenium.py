@@ -55,9 +55,10 @@ def _headless() -> bool:
 
 
 def _build_driver(download_dir: Path):
-    from selenium import webdriver
+    # Явные импорты — PyInstaller иначе не видит lazy selenium.webdriver.Chrome
     from selenium.webdriver.chrome.options import Options
     from selenium.webdriver.chrome.service import Service
+    from selenium.webdriver.chrome.webdriver import WebDriver as Chrome
 
     try:
         from webdriver_manager.chrome import ChromeDriverManager
@@ -88,7 +89,7 @@ def _build_driver(download_dir: Path):
     )
 
     service = Service(ChromeDriverManager().install())
-    driver = webdriver.Chrome(service=service, options=options)
+    driver = Chrome(service=service, options=options)
 
     # enable downloads in headless chrome
     if _headless():
