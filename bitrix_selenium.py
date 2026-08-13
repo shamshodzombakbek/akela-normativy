@@ -13,7 +13,7 @@ import re
 import time
 from datetime import date
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import parse_qs, urlparse
 
 from dotenv import load_dotenv
@@ -1028,6 +1028,8 @@ def download_work_report_excels(
     target_day: date,
     *,
     only_report_ids: set[int] | list[int] | None = None,
+    on_log: Callable[[str], None] | None = None,
+    on_progress: Callable[[int, int, str], None] | None = None,
 ) -> dict[str, Any]:
     """
     Отчёты о работе (таблица дней):
@@ -1036,11 +1038,27 @@ def download_work_report_excels(
     3) вниз к файлам Normativ_*.xlsx и скачать
 
     only_report_ids — если задан, качает только эти report id (добавление «опоздавших»).
+    on_log / on_progress — живой прогресс в десктоп-приложении.
     """
     download_dir = _download_dir(target_day)
     messages: list[str] = []
     before = {p.name for p in download_dir.iterdir() if p.is_file()}
     only_ids = {int(x) for x in (only_report_ids or [])} or None
+
+    def emit(msg: str) -> None:
+        messages.append(msg)
+        if on_log:
+            try:
+                on_log(msg)
+            except Exception:
+                pass
+
+    def progress(cur: int, total: int, label: str = "") -> None:
+        if on_progress:
+            try:
+                on_progress(cur, total, label)
+            except Exception:
+                pass
 
     driver = _build_driver(download_dir)
     downloaded: list[Path] = []
@@ -1049,16 +1067,26 @@ def download_work_report_excels(
     seen_href: set[str] = set()
 
     try:
+        progress(0, 100, "Вход в Битрикс24…")
+        emit("Вход в Битрикс24…")
         login_bitrix(driver)
-        messages.append("Вход в Битрикс24 выполнен.")
+        emit("Вход в Битрикс24 выполнен.")
+        progress(5, 100, "Открываю «Отчёты о работе»…")
 
         driver.get(_portal() + WORK_REPORT_PATH)
         time.sleep(5)
         for m in _dismiss_submit_notifications(driver):
-            messages.append(m)
+            emit(m)
 
+        n_before = len(messages)
         _ensure_month(driver, target_day, messages)
         _disable_statistics(driver, messages)
+        if on_log:
+            for m in messages[n_before:]:
+                try:
+                    on_log(m)
+                except Exception:
+                    pass
 
         # обойти все страницы таблицы (Страницы: 1 2 3 4…)
         page = 1
@@ -1067,18 +1095,19 @@ def download_work_report_excels(
         seen_reports: set[int] = set()
 
         while page <= max_pages:
+            progress(5 + min(page, 10), 100, f"Сканирую страницу {page}…")
             n_slides = _wait_for_slides(driver, timeout=20 if page == 1 else 15)
-            messages.append(f"Страница {page}: SLIDE={n_slides}.")
+            emit(f"Страница {page}: SLIDE={n_slides}.")
             info = _slides_for_day(driver, target_day)
             if info.get("warning"):
-                messages.append(f"  ⚠ {info['warning']}")
+                emit(f"  ⚠ {info['warning']}")
             for s in info["selected"]:
                 rid = int(s["report"])
                 if rid in seen_reports:
                     continue
                 seen_reports.add(rid)
                 all_selected.append(s)
-            messages.append(
+            emit(
                 f"  день {target_day.day}: колонка={info['day_col']}, "
                 f"на странице={len(info['selected'])}, накоплено={len(all_selected)}."
             )
@@ -1105,7 +1134,7 @@ def download_work_report_excels(
         selected = all_selected
         if only_ids is not None:
             selected = [s for s in selected if int(s["report"]) in only_ids]
-            messages.append(
+            emit(
                 f"Выбрано к докачке: {len(selected)} из списка "
                 f"({len(only_ids)} id)."
             )
@@ -1120,11 +1149,13 @@ def download_work_report_excels(
                         "detail": "отчёт не найден в таблице за этот день",
                     }
                 )
-        messages.append(f"Всего отчётов за день к открытию: {len(selected)}.")
+        emit(f"Всего отчётов за день к открытию: {len(selected)}.")
+        progress(15, 100, f"Найдено отчётов: {len(selected)}")
 
         if not selected:
-            messages.append("Нет ячеек отчётов — сохраняю debug.")
-            messages.extend(_debug_dump(driver, download_dir, "no_slides"))
+            emit("Нет ячеек отчётов — сохраняю debug.")
+            for m in _debug_dump(driver, download_dir, "no_slides"):
+                emit(m)
         else:
             from selenium.webdriver.common.by import By
 
@@ -1140,11 +1171,15 @@ def download_work_report_excels(
                 except Exception:
                     break
 
+        total_sel = max(len(selected), 1)
         for idx, item in enumerate(selected, start=1):
             uid = int(item["user_id"])
             rid = int(item["report"])
             label = _report_label(item)
-            messages.append(f"[{idx}/{len(selected)}] {label} (report={rid})…")
+            # 15%…90% на разбор отчётов
+            pct = 15 + int(75 * idx / total_sel)
+            progress(pct, 100, f"{idx}/{len(selected)} · {label}")
+            emit(f"[{idx}/{len(selected)}] ({pct}%) {label}…")
 
             try:
                 _open_report_slider(driver, uid, rid)
@@ -1158,7 +1193,7 @@ def download_work_report_excels(
                         "detail": str(exc),
                     }
                 )
-                messages.append(f"  ⊘ пропуск: не открылся — {exc}")
+                emit(f"  ⊘ пропуск: не открылся — {exc}")
                 continue
 
             ready = False
@@ -1182,7 +1217,7 @@ def download_work_report_excels(
                         "detail": "попап отчёта не появился",
                     }
                 )
-                messages.append("  ⊘ пропуск: попап не появился.")
+                emit("  ⊘ пропуск: попап не появился.")
                 _close_report_slider(driver)
                 continue
 
@@ -1212,15 +1247,15 @@ def download_work_report_excels(
                             "detail": "нет ссылки/кнопки скачивания",
                         }
                     )
-                    messages.append("  ⊘ пропуск: нет ссылки на скачивание.")
+                    emit("  ⊘ пропуск: нет ссылки на скачивание.")
                     _close_report_slider(driver)
                     time.sleep(0.4)
                     continue
 
-                messages.append(f"  ссылок на скачивание: {len(pick_links)}.")
+                emit(f"  ссылок на скачивание: {len(pick_links)}.")
                 file_clicks = _click_file_icons(driver)
                 if file_clicks:
-                    messages.append(f"  кликов по файлам: {file_clicks}")
+                    emit(f"  кликов по файлам: {file_clicks}")
                     time.sleep(1.5)
                     for p in download_dir.iterdir():
                         if (
@@ -1258,7 +1293,7 @@ def download_work_report_excels(
                             "detail": f"ссылки есть ({len(pick_links)}), файл не скачался",
                         }
                     )
-                    messages.append("  ⊘ пропуск: ссылка есть, скачивание не удалось.")
+                    emit("  ⊘ пропуск: ссылка есть, скачивание не удалось.")
                 else:
                     downloaded_reports.append(
                         {
@@ -1268,7 +1303,7 @@ def download_work_report_excels(
                             "files": report_files,
                         }
                     )
-                    messages.append(f"  ✓ скачано: {', '.join(report_files)}")
+                    emit(f"  ✓ скачано: {', '.join(report_files)}")
             except Exception as exc:
                 skipped_reports.append(
                     {
@@ -1279,12 +1314,20 @@ def download_work_report_excels(
                         "detail": str(exc),
                     }
                 )
-                messages.append(f"  ⊘ ошибка при обработке: {exc}")
+                emit(f"  ⊘ ошибка при обработке: {exc}")
             finally:
                 _close_report_slider(driver)
                 time.sleep(0.5)
 
+        # итог — через emit, чтобы сразу в UI
+        before_summary = len(messages)
         _log_import_summary(messages, downloaded_reports, skipped_reports)
+        if on_log:
+            for m in messages[before_summary:]:
+                try:
+                    on_log(m)
+                except Exception:
+                    pass
 
         excel_files = sorted(
             {
@@ -1300,12 +1343,14 @@ def download_work_report_excels(
         )
         normativ = [p for p in excel_files if "normativ" in p.name.lower()]
         if normativ:
-            messages.append(f"Из них Normativ_*: {len(normativ)}.")
+            emit(f"Из них Normativ_*: {len(normativ)}.")
             excel_files = normativ
-        messages.append(f"Скачано Excel-файлов: {len(excel_files)}.")
+        emit(f"Скачано Excel-файлов: {len(excel_files)}.")
+        progress(92, 100, "Файлы скачаны")
 
         if not excel_files:
-            messages.extend(_debug_dump(driver, download_dir, "no_excel_final"))
+            for m in _debug_dump(driver, download_dir, "no_excel_final"):
+                emit(m)
 
         return {
             "dir": download_dir,

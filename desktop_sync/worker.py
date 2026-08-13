@@ -11,6 +11,7 @@ from schedule import active_window_day, is_fetch_window, now_tashkent
 
 
 LogFn = Callable[[str], None]
+ProgressFn = Callable[[int, int, str], None]
 
 
 def _write_log(line: str) -> None:
@@ -27,6 +28,7 @@ def run_sync_once(
     *,
     force: bool = False,
     on_log: LogFn | None = None,
+    on_progress: ProgressFn | None = None,
     only_report_ids: set[int] | list[int] | None = None,
     replace: bool | None = None,
 ) -> dict[str, Any]:
@@ -78,15 +80,22 @@ def run_sync_once(
         else:
             log(f"Старт: «Отчёты» → Диск → сайт · слот {window_day.isoformat()}")
 
+        if on_progress:
+            try:
+                on_progress(1, 100, "Старт…")
+            except Exception:
+                pass
+
         result = fetch_normativs(
             window_day,
             source="auto" if not only_report_ids else "reports",
             publish=True,
             replace=do_replace,
             only_report_ids=only_report_ids,
+            on_log=log,
+            on_progress=on_progress,
         )
-        for m in result.get("messages") or []:
-            log(str(m))
+        # сообщения уже ушли через on_log во время работы
 
         skipped = list(result.get("skipped_reports") or [])
         downloaded = list(result.get("downloaded_reports") or [])
@@ -94,6 +103,11 @@ def run_sync_once(
         if result.get("ok"):
             msg = f"OK · {result.get('count', 0)} записей опубликовано на сайт"
             log(msg)
+            if on_progress:
+                try:
+                    on_progress(100, 100, "Готово")
+                except Exception:
+                    pass
             return {
                 "ok": True,
                 "message": msg,

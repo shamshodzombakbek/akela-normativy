@@ -27,7 +27,7 @@ from desktop_sync.config_store import (  # noqa: E402
 from desktop_sync.worker import run_sync_once  # noqa: E402
 
 APP_TITLE = "Akela · Синхронизация нормативов"
-APP_VERSION = "1.5"
+APP_VERSION = "1.6"
 
 # Windows keycodes (не зависят от RU/EN раскладки)
 _KC_A, _KC_C, _KC_V, _KC_X = 65, 67, 86, 88
@@ -216,6 +216,17 @@ class SyncApp(tk.Tk):
         self._status = ttk.Label(act_row, text="Статус: ожидание")
         self._status.pack(side=tk.LEFT, padx=8)
 
+        prog_row = ttk.Frame(actions)
+        prog_row.pack(fill=tk.X, padx=8, pady=(0, 8))
+        self._progress = ttk.Progressbar(
+            prog_row, mode="determinate", maximum=100, length=420
+        )
+        self._progress.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self._progress_pct = ttk.Label(prog_row, text="0%", width=6)
+        self._progress_pct.pack(side=tk.LEFT, padx=8)
+        self._progress_detail = ttk.Label(actions, text="", foreground="gray")
+        self._progress_detail.pack(anchor=tk.W, padx=10, pady=(0, 6))
+
         missing = ttk.LabelFrame(
             frm,
             text="Не загружены (можно выбрать и добавить на сайт)",
@@ -345,6 +356,26 @@ class SyncApp(tk.Tk):
     def _set_status(self, text: str) -> None:
         self._status.configure(text=f"Статус: {text}")
 
+    def _set_progress(self, cur: int, total: int, label: str = "") -> None:
+        total = max(int(total or 0), 1)
+        cur = max(0, min(int(cur or 0), total))
+        pct = int(100 * cur / total)
+        self._progress.configure(value=pct)
+        self._progress_pct.configure(text=f"{pct}%")
+        detail = (label or "").strip()
+        if detail:
+            self._progress_detail.configure(text=detail[:90])
+            self._set_status(f"{pct}% · {detail[:50]}")
+        else:
+            self._progress_detail.configure(text="")
+            self._set_status(f"{pct}%")
+
+    def _reset_progress(self, *, done: bool = False) -> None:
+        self._progress.configure(value=100 if done else 0)
+        self._progress_pct.configure(text="100%" if done else "0%")
+        if not done:
+            self._progress_detail.configure(text="")
+
     def _reason_label(self, reason: str) -> str:
         return _REASON_RU.get(str(reason or ""), str(reason or "—"))
 
@@ -453,15 +484,23 @@ class SyncApp(tk.Tk):
         replace: bool | None = None,
     ) -> None:
         self._busy = True
+        self.after(0, lambda: self._reset_progress())
         self.after(0, lambda: self._set_status("синхронизация…"))
         self.after(0, lambda: self._add_btn.configure(state=tk.DISABLED))
 
         def on_log(m: str) -> None:
             self.after(0, lambda msg=m: self._append_log(msg))
 
+        def on_progress(cur: int, total: int, label: str = "") -> None:
+            self.after(
+                0,
+                lambda c=cur, t=total, lb=label: self._set_progress(c, t, lb),
+            )
+
         result = run_sync_once(
             force=force,
             on_log=on_log,
+            on_progress=on_progress,
             only_report_ids=only_report_ids,
             replace=replace,
         )
@@ -473,19 +512,23 @@ class SyncApp(tk.Tk):
         ok = bool(result.get("ok"))
         outside = bool(result.get("outside_window"))
         if outside:
+            self._reset_progress()
             self._set_status("ожидание окна 16:00–18:30")
             return
 
         skipped = list(result.get("skipped_reports") or [])
         downloaded = list(result.get("downloaded_reports") or [])
+        self._reset_progress(done=True)
 
         if selective:
             self._remove_downloaded_from_missing(downloaded)
-            # тех, кого снова не удалось — обновить/оставить
             if skipped:
                 self._set_missing(skipped, merge=True)
             self._set_status(
                 f"добавлено {len(downloaded)}" if downloaded else "не добавлено"
+            )
+            self._progress_detail.configure(
+                text=f"Осталось без файла: {len(self._skipped_rows)}"
             )
             if downloaded:
                 messagebox.showinfo(
@@ -497,6 +540,9 @@ class SyncApp(tk.Tk):
             self._set_missing(skipped)
             self._set_status("OK" if ok else "есть не загруженные / ошибка")
             if skipped:
+                self._progress_detail.configure(
+                    text=f"Не загружено: {len(skipped)} — выберите и добавьте"
+                )
                 self._append_log(
                     f"Не загружено: {len(skipped)} — выберите в списке и нажмите "
                     "«Добавить выбранных»."
