@@ -27,15 +27,21 @@ from desktop_sync.config_store import (  # noqa: E402
 from desktop_sync.worker import run_sync_once  # noqa: E402
 
 APP_TITLE = "Akela · Синхронизация нормативов"
-APP_VERSION = "1.2"
+APP_VERSION = "1.3"
+
+# Windows keycodes (не зависят от RU/EN раскладки)
+_KC_A, _KC_C, _KC_V, _KC_X = 65, 67, 86, 88
 
 
 def _bind_clipboard(entry: ttk.Entry) -> None:
-    """Ctrl+V/C/X/A и меню по правому клику — ttk.Entry на Windows часто без этого."""
+    """Ctrl+V/C/X/A и ПКМ-меню. На Windows с русской раскладкой keysym не работает — берём keycode."""
 
     def paste(_event=None):
         try:
             text = entry.clipboard_get()
+        except tk.TclError:
+            return "break"
+        try:
             if entry.selection_present():
                 entry.delete(tk.SEL_FIRST, tk.SEL_LAST)
             entry.insert(tk.INSERT, text)
@@ -49,6 +55,8 @@ def _bind_clipboard(entry: ttk.Entry) -> None:
                 text = entry.selection_get()
                 entry.clipboard_clear()
                 entry.clipboard_append(text)
+                # держим буфер после закрытия окна
+                entry.update()
         except tk.TclError:
             pass
         return "break"
@@ -67,14 +75,25 @@ def _bind_clipboard(entry: ttk.Entry) -> None:
         entry.icursor(tk.END)
         return "break"
 
-    for seq in ("<Control-v>", "<Control-V>", "<Shift-Insert>"):
-        entry.bind(seq, paste)
-    for seq in ("<Control-c>", "<Control-C>"):
-        entry.bind(seq, copy)
-    for seq in ("<Control-x>", "<Control-X>"):
-        entry.bind(seq, cut)
-    for seq in ("<Control-a>", "<Control-A>"):
-        entry.bind(seq, select_all)
+    def on_ctrl_key(event):
+        # keycode — физическая клавиша (V=86), работает и на RU-раскладке
+        code = int(getattr(event, "keycode", 0) or 0)
+        if code == _KC_V:
+            return paste(event)
+        if code == _KC_C:
+            return copy(event)
+        if code == _KC_X:
+            return cut(event)
+        if code == _KC_A:
+            return select_all(event)
+        return None
+
+    # Один обработчик по keycode — без двойной вставки на EN
+    entry.bind("<Control-KeyPress>", on_ctrl_key)
+    entry.bind("<Shift-Insert>", paste)
+    entry.bind("<<Paste>>", paste)
+    entry.bind("<<Copy>>", copy)
+    entry.bind("<<Cut>>", cut)
 
     menu = tk.Menu(entry, tearoff=0)
     menu.add_command(label="Вырезать", command=cut)
@@ -88,8 +107,11 @@ def _bind_clipboard(entry: ttk.Entry) -> None:
             menu.tk_popup(event.x_root, event.y_root)
         finally:
             menu.grab_release()
+        return "break"
 
+    # ПКМ: Windows Button-3, часть тачпадов Button-2
     entry.bind("<Button-3>", show_menu)
+    entry.bind("<Button-2>", show_menu)
 
 
 class SyncApp(tk.Tk):

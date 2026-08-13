@@ -30,4 +30,8 @@ Akela Normativ Sync — Windows
 
 Лог: %APPDATA%\AkelaNormativSync\sync.log
 
-Сборка exe: GitHub → Actions → «Build Windows desktop app» → Artifacts.
+Скачать готовый exe:
+https://github.com/shamshodzombakbek/akela-normativy/releases/latest
+
+В полях настроек: Ctrl+V / Ctrl+C / Ctrl+X / Ctrl+A и меню по правому клику
+(работает и при русской раскладке клавиатуры).
