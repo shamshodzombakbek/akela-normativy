@@ -1024,16 +1024,23 @@ def _close_report_slider(driver) -> None:
         pass
 
 
-def download_work_report_excels(target_day: date) -> dict[str, Any]:
+def download_work_report_excels(
+    target_day: date,
+    *,
+    only_report_ids: set[int] | list[int] | None = None,
+) -> dict[str, Any]:
     """
     Отчёты о работе (таблица дней):
     1) выключить «Статистика»
     2) открыть ячейки отчётов за нужный день (BX.StartSlider)
     3) вниз к файлам Normativ_*.xlsx и скачать
+
+    only_report_ids — если задан, качает только эти report id (добавление «опоздавших»).
     """
     download_dir = _download_dir(target_day)
     messages: list[str] = []
     before = {p.name for p in download_dir.iterdir() if p.is_file()}
+    only_ids = {int(x) for x in (only_report_ids or [])} or None
 
     driver = _build_driver(download_dir)
     downloaded: list[Path] = []
@@ -1096,6 +1103,23 @@ def download_work_report_excels(target_day: date) -> dict[str, Any]:
             time.sleep(3.5)
 
         selected = all_selected
+        if only_ids is not None:
+            selected = [s for s in selected if int(s["report"]) in only_ids]
+            messages.append(
+                f"Выбрано к докачке: {len(selected)} из списка "
+                f"({len(only_ids)} id)."
+            )
+            missing_ids = only_ids - {int(s["report"]) for s in selected}
+            for rid in sorted(missing_ids):
+                skipped_reports.append(
+                    {
+                        "user_id": 0,
+                        "report_id": rid,
+                        "employee": f"report={rid}",
+                        "reason": "not_found",
+                        "detail": "отчёт не найден в таблице за этот день",
+                    }
+                )
         messages.append(f"Всего отчётов за день к открытию: {len(selected)}.")
 
         if not selected:

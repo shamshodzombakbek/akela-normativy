@@ -34,7 +34,11 @@ def selenium_available() -> tuple[bool, str]:
     return True, ""
 
 
-def fetch_reports_to_disk(target_day: date) -> dict[str, Any]:
+def fetch_reports_to_disk(
+    target_day: date,
+    *,
+    only_report_ids: set[int] | list[int] | None = None,
+) -> dict[str, Any]:
     """
     Открывает «Отчёты о работе», качает Normativ_*.xlsx,
     кладёт в Общий диск / Akela Normativy / YYYY-MM-DD /.
@@ -42,7 +46,9 @@ def fetch_reports_to_disk(target_day: date) -> dict[str, Any]:
     from bitrix_selenium import download_work_report_excels
 
     messages: list[str] = []
-    result = download_work_report_excels(target_day)
+    result = download_work_report_excels(
+        target_day, only_report_ids=only_report_ids
+    )
     for msg in result.get("messages") or []:
         messages.append(str(msg))
 
@@ -106,12 +112,15 @@ def fetch_normativs(
     source: Source = "disk",
     publish: bool = True,
     replace: bool = True,
+    only_report_ids: set[int] | list[int] | None = None,
 ) -> dict[str, Any]:
     """
     source:
       disk — только REST с Диска (сайт / GitHub Actions);
       reports — Selenium из «Отчётов» + копия на Диск (десктоп);
       auto — сначала «Отчёты», если пусто — Диск.
+
+    only_report_ids — докачать только выбранные отчёты (replace обычно False).
     """
     window_day = window_day or active_window_day()
     target = bitrix_target_day(window_day)
@@ -122,21 +131,28 @@ def fetch_normativs(
     file_blobs: dict[str, bytes] = {}
     source_used: str | None = None
     local_dir: Path | None = None
+    skipped_reports: list[dict[str, Any]] = []
+    downloaded_reports: list[dict[str, Any]] = []
 
-    if source in ("auto", "reports"):
+    # Выборочная докачка — только через «Отчёты», без fallback на весь Диск
+    effective_source: Source = "reports" if only_report_ids else source
+
+    if effective_source in ("auto", "reports"):
         ok_sel, why = selenium_available()
         if not ok_sel:
             messages.append(why)
         else:
             messages.append("Качаю из раздела «Отчёты о работе»…")
-            rep = fetch_reports_to_disk(target)
+            rep = fetch_reports_to_disk(target, only_report_ids=only_report_ids)
             messages.extend(rep.get("messages") or [])
+            skipped_reports = list(rep.get("skipped_reports") or [])
+            downloaded_reports = list(rep.get("downloaded_reports") or [])
             if rep.get("ok") and rep.get("file_blobs"):
                 file_blobs = dict(rep["file_blobs"])
                 source_used = "reports"
                 local_dir = Path(rep["dir"]) if rep.get("dir") else None
 
-    if not file_blobs and source in ("auto", "disk"):
+    if not file_blobs and effective_source in ("auto", "disk") and not only_report_ids:
         disk = fetch_normativs_from_disk(target)
         messages.extend(disk.get("messages") or [])
         if disk.get("ok") and disk.get("file_blobs"):
@@ -152,9 +168,12 @@ def fetch_normativs(
             "source": source_used,
             "messages": messages,
             "count": 0,
+            "skipped_reports": skipped_reports,
+            "downloaded_reports": downloaded_reports,
         }
 
-    if local_dir and Path(local_dir).is_dir():
+    if local_dir and Path(local_dir).is_dir() and not only_report_ids:
+        # Полный прогон: читаем все файлы в папке дня
         incoming = load_excel_reports_from_dir(local_dir)
     else:
         incoming = load_excel_reports_from_blobs(file_blobs)
@@ -169,6 +188,8 @@ def fetch_normativs(
             "messages": messages,
             "count": 0,
             "file_blobs": file_blobs,
+            "skipped_reports": skipped_reports,
+            "downloaded_reports": downloaded_reports,
         }
 
     skipped = incoming.attrs.get("skipped_non_reports") or []
@@ -193,9 +214,10 @@ def fetch_normativs(
             force=True,
             file_blobs=file_blobs,
         )
+        mode = "замена" if replace else "добавление к уже загруженным"
         messages.append(
             f"Опубликовано на сайт: {meta.get('count', len(df_pub))} записей "
-            f"(источник: {source_used})."
+            f"(источник: {source_used}, {mode})."
         )
     else:
         messages.append(f"Распознано записей: {len(incoming)} (без публикации).")
@@ -204,9 +226,11 @@ def fetch_normativs(
         "ok": True,
         "window_day": window_day,
         "target_day": target,
-        "source": source_used or source,
+        "source": source_used or effective_source,
         "messages": messages,
         "count": len(incoming),
         "meta": meta,
         "file_blobs": file_blobs,
+        "skipped_reports": skipped_reports,
+        "downloaded_reports": downloaded_reports,
     }

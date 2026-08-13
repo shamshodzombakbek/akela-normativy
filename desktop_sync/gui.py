@@ -27,10 +27,19 @@ from desktop_sync.config_store import (  # noqa: E402
 from desktop_sync.worker import run_sync_once  # noqa: E402
 
 APP_TITLE = "Akela · Синхронизация нормативов"
-APP_VERSION = "1.4"
+APP_VERSION = "1.5"
 
 # Windows keycodes (не зависят от RU/EN раскладки)
 _KC_A, _KC_C, _KC_V, _KC_X = 65, 67, 86, 88
+
+_REASON_RU = {
+    "no_download_link": "нет файла / не успел",
+    "open_failed": "не открылся отчёт",
+    "popup_missing": "попап не появился",
+    "download_failed": "скачивание не удалось",
+    "not_found": "не найден в таблице",
+    "error": "ошибка",
+}
 
 
 def _bind_clipboard(entry: ttk.Entry) -> None:
@@ -55,7 +64,6 @@ def _bind_clipboard(entry: ttk.Entry) -> None:
                 text = entry.selection_get()
                 entry.clipboard_clear()
                 entry.clipboard_append(text)
-                # держим буфер после закрытия окна
                 entry.update()
         except tk.TclError:
             pass
@@ -76,7 +84,6 @@ def _bind_clipboard(entry: ttk.Entry) -> None:
         return "break"
 
     def on_ctrl_key(event):
-        # keycode — физическая клавиша (V=86), работает и на RU-раскладке
         code = int(getattr(event, "keycode", 0) or 0)
         if code == _KC_V:
             return paste(event)
@@ -88,7 +95,6 @@ def _bind_clipboard(entry: ttk.Entry) -> None:
             return select_all(event)
         return None
 
-    # Один обработчик по keycode — без двойной вставки на EN
     entry.bind("<Control-KeyPress>", on_ctrl_key)
     entry.bind("<Shift-Insert>", paste)
     entry.bind("<<Paste>>", paste)
@@ -109,7 +115,6 @@ def _bind_clipboard(entry: ttk.Entry) -> None:
             menu.grab_release()
         return "break"
 
-    # ПКМ: Windows Button-3, часть тачпадов Button-2
     entry.bind("<Button-3>", show_menu)
     entry.bind("<Button-2>", show_menu)
 
@@ -118,19 +123,20 @@ class SyncApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title(APP_TITLE)
-        self.geometry("680x640")
-        self.minsize(560, 500)
+        self.geometry("720x780")
+        self.minsize(600, 620)
 
         self._cfg = load_config()
         self._auto_running = False
         self._auto_thread: threading.Thread | None = None
         self._busy = False
+        self._skipped_rows: list[dict] = []
 
         self._build_ui()
         self._load_fields()
 
         if is_configured(self._cfg):
-            self._append_log("Настройки загружены. Можно запустить автосинхронизацию.")
+            self._append_log("Настройки загружены. Авто: 16:00–18:30 (Ташкент).")
             if self._cfg.auto_sync:
                 self.after(800, self._start_auto)
         else:
@@ -148,9 +154,9 @@ class SyncApp(tk.Tk):
         )
         ttk.Label(
             frm,
-            text="Качает Excel из «Отчёты о работе» в Битрикс24, кладёт на Диск "
-            "(папка Akela Normativy / дата), сайт берёт файлы оттуда.",
-            wraplength=620,
+            text="Авто: каждые N мин в окне 16:00–18:30 (Ташкент). "
+            "Кнопка «Сейчас» — в любой момент. Ниже — кто не успел сдать файл.",
+            wraplength=680,
         ).pack(anchor=tk.W, padx=10)
 
         settings = ttk.LabelFrame(frm, text="Настройки (один раз)")
@@ -200,17 +206,63 @@ class SyncApp(tk.Tk):
 
         act_row = ttk.Frame(actions)
         act_row.pack(fill=tk.X, padx=8, pady=6)
-        ttk.Button(act_row, text="Синхронизировать сейчас", command=self._sync_now).pack(
-            side=tk.LEFT
-        )
+        ttk.Button(
+            act_row,
+            text="Синхронизировать сейчас",
+            command=self._sync_now,
+        ).pack(side=tk.LEFT)
         self._auto_btn = ttk.Button(act_row, text="Запустить авто", command=self._toggle_auto)
         self._auto_btn.pack(side=tk.LEFT, padx=8)
         self._status = ttk.Label(act_row, text="Статус: ожидание")
         self._status.pack(side=tk.LEFT, padx=8)
 
+        missing = ttk.LabelFrame(
+            frm,
+            text="Не загружены (можно выбрать и добавить на сайт)",
+        )
+        missing.pack(fill=tk.BOTH, expand=False, **pad)
+
+        ttk.Label(
+            missing,
+            text="После синхронизации здесь — сотрудники без Excel. "
+            "Выделите нужных (Ctrl/Shift) и нажмите «Добавить выбранных».",
+            wraplength=680,
+        ).pack(anchor=tk.W, padx=8, pady=2)
+
+        list_wrap = ttk.Frame(missing)
+        list_wrap.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
+        scroll = ttk.Scrollbar(list_wrap)
+        scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self._missing_list = tk.Listbox(
+            list_wrap,
+            selectmode=tk.EXTENDED,
+            height=8,
+            exportselection=False,
+            yscrollcommand=scroll.set,
+        )
+        self._missing_list.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scroll.config(command=self._missing_list.yview)
+
+        miss_btns = ttk.Frame(missing)
+        miss_btns.pack(fill=tk.X, padx=8, pady=6)
+        ttk.Button(miss_btns, text="Выбрать всех", command=self._select_all_missing).pack(
+            side=tk.LEFT
+        )
+        ttk.Button(miss_btns, text="Снять выбор", command=self._clear_missing_selection).pack(
+            side=tk.LEFT, padx=6
+        )
+        self._add_btn = ttk.Button(
+            miss_btns,
+            text="Добавить выбранных",
+            command=self._add_selected,
+        )
+        self._add_btn.pack(side=tk.LEFT, padx=6)
+        self._missing_count = ttk.Label(miss_btns, text="0 чел.")
+        self._missing_count.pack(side=tk.LEFT, padx=8)
+
         log_frame = ttk.LabelFrame(frm, text="Журнал")
         log_frame.pack(fill=tk.BOTH, expand=True, **pad)
-        self._log = scrolledtext.ScrolledText(log_frame, height=12, state=tk.DISABLED)
+        self._log = scrolledtext.ScrolledText(log_frame, height=10, state=tk.DISABLED)
         self._log.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
 
     def _row(self, parent: ttk.LabelFrame, label: str, var: tk.StringVar) -> None:
@@ -293,29 +345,162 @@ class SyncApp(tk.Tk):
     def _set_status(self, text: str) -> None:
         self._status.configure(text=f"Статус: {text}")
 
+    def _reason_label(self, reason: str) -> str:
+        return _REASON_RU.get(str(reason or ""), str(reason or "—"))
+
+    def _set_missing(self, rows: list[dict], *, merge: bool = False) -> None:
+        """Обновить список «не загружены»."""
+        if merge and self._skipped_rows:
+            by_id = {int(r.get("report_id") or 0): r for r in self._skipped_rows}
+            for r in rows:
+                rid = int(r.get("report_id") or 0)
+                if rid:
+                    by_id[rid] = r
+            rows = list(by_id.values())
+
+        # убрать тех, кого только что успешно скачали — делается отдельно
+        self._skipped_rows = [
+            r for r in rows if int(r.get("report_id") or 0) > 0
+        ]
+        self._skipped_rows.sort(
+            key=lambda r: str(r.get("employee") or "").casefold()
+        )
+
+        self._missing_list.delete(0, tk.END)
+        for r in self._skipped_rows:
+            name = str(r.get("employee") or "—")
+            why = self._reason_label(str(r.get("reason") or ""))
+            detail = str(r.get("detail") or "").strip()
+            line = f"{name}  ·  {why}"
+            if detail and detail not in why:
+                line += f" ({detail[:60]})"
+            self._missing_list.insert(tk.END, line)
+        self._missing_count.configure(text=f"{len(self._skipped_rows)} чел.")
+
+    def _remove_downloaded_from_missing(self, downloaded: list[dict]) -> None:
+        done = {int(r.get("report_id") or 0) for r in downloaded}
+        done.discard(0)
+        if not done:
+            return
+        left = [
+            r for r in self._skipped_rows if int(r.get("report_id") or 0) not in done
+        ]
+        self._set_missing(left)
+
+    def _select_all_missing(self) -> None:
+        self._missing_list.select_set(0, tk.END)
+
+    def _clear_missing_selection(self) -> None:
+        self._missing_list.selection_clear(0, tk.END)
+
+    def _selected_report_ids(self) -> list[int]:
+        idxs = self._missing_list.curselection()
+        ids: list[int] = []
+        for i in idxs:
+            if 0 <= i < len(self._skipped_rows):
+                rid = int(self._skipped_rows[i].get("report_id") or 0)
+                if rid:
+                    ids.append(rid)
+        return ids
+
     def _sync_now(self) -> None:
         if self._busy:
             return
         if not is_configured(self._cfg):
             messagebox.showwarning("Настройки", "Сначала сохраните настройки.")
             return
-        threading.Thread(target=self._run_sync, kwargs={"force": True}, daemon=True).start()
+        threading.Thread(
+            target=self._run_sync, kwargs={"force": True}, daemon=True
+        ).start()
 
-    def _run_sync(self, *, force: bool = False) -> None:
+    def _add_selected(self) -> None:
+        if self._busy:
+            return
+        if not is_configured(self._cfg):
+            messagebox.showwarning("Настройки", "Сначала сохраните настройки.")
+            return
+        ids = self._selected_report_ids()
+        if not ids:
+            messagebox.showinfo(
+                "Выбор",
+                "Выделите в списке сотрудников, которых нужно добавить.",
+            )
+            return
+        names = [
+            str(self._skipped_rows[i].get("employee") or "")
+            for i in self._missing_list.curselection()
+            if 0 <= i < len(self._skipped_rows)
+        ]
+        ok = messagebox.askyesno(
+            "Добавить выбранных",
+            f"Докачать и добавить на сайт ({len(ids)}):\n"
+            + "\n".join(f"• {n}" for n in names[:12])
+            + ("\n…" if len(names) > 12 else ""),
+        )
+        if not ok:
+            return
+        threading.Thread(
+            target=self._run_sync,
+            kwargs={"force": True, "only_report_ids": ids, "replace": False},
+            daemon=True,
+        ).start()
+
+    def _run_sync(
+        self,
+        *,
+        force: bool = False,
+        only_report_ids: list[int] | None = None,
+        replace: bool | None = None,
+    ) -> None:
         self._busy = True
-        self._set_status("синхронизация…")
+        self.after(0, lambda: self._set_status("синхронизация…"))
+        self.after(0, lambda: self._add_btn.configure(state=tk.DISABLED))
 
         def on_log(m: str) -> None:
-            self.after(0, lambda: self._append_log(m))
+            self.after(0, lambda msg=m: self._append_log(msg))
 
-        ok, msg = run_sync_once(force=force, on_log=on_log)
-        self.after(0, lambda: self._finish_sync(ok, msg))
+        result = run_sync_once(
+            force=force,
+            on_log=on_log,
+            only_report_ids=only_report_ids,
+            replace=replace,
+        )
+        self.after(0, lambda: self._finish_sync(result, selective=bool(only_report_ids)))
 
-    def _finish_sync(self, ok: bool, msg: str) -> None:
+    def _finish_sync(self, result: dict, *, selective: bool = False) -> None:
         self._busy = False
-        self._set_status("OK" if ok else "ошибка / нет файлов")
-        if not ok and "Вне окна" not in msg:
-            self.after(0, lambda: None)  # log already has details
+        self._add_btn.configure(state=tk.NORMAL)
+        ok = bool(result.get("ok"))
+        outside = bool(result.get("outside_window"))
+        if outside:
+            self._set_status("ожидание окна 16:00–18:30")
+            return
+
+        skipped = list(result.get("skipped_reports") or [])
+        downloaded = list(result.get("downloaded_reports") or [])
+
+        if selective:
+            self._remove_downloaded_from_missing(downloaded)
+            # тех, кого снова не удалось — обновить/оставить
+            if skipped:
+                self._set_missing(skipped, merge=True)
+            self._set_status(
+                f"добавлено {len(downloaded)}" if downloaded else "не добавлено"
+            )
+            if downloaded:
+                messagebox.showinfo(
+                    "Готово",
+                    f"Добавлено на сайт: {len(downloaded)}.\n"
+                    f"Осталось без файла: {len(self._skipped_rows)}.",
+                )
+        else:
+            self._set_missing(skipped)
+            self._set_status("OK" if ok else "есть не загруженные / ошибка")
+            if skipped:
+                self._append_log(
+                    f"Не загружено: {len(skipped)} — выберите в списке и нажмите "
+                    "«Добавить выбранных»."
+                )
 
     def _toggle_auto(self) -> None:
         if self._auto_running:
@@ -331,8 +516,8 @@ class SyncApp(tk.Tk):
             return
         self._auto_running = True
         self._auto_btn.configure(text="Остановить авто")
-        self._set_status("авто · работает")
-        self._append_log("Автосинхронизация запущена.")
+        self._set_status("авто · 16:00–18:30")
+        self._append_log("Автосинхронизация запущена (только 16:00–18:30).")
         self._auto_thread = threading.Thread(target=self._auto_loop, daemon=True)
         self._auto_thread.start()
 
